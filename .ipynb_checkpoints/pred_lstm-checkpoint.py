@@ -6,10 +6,6 @@ import random
 from sklearn.utils import shuffle
 import tensorflow as tf
 from time import time
-from os.path import exists
-import pandas as pd
-import dataframe_image as dfi
-
 try:
     from tensorflow.python.ops.nn_ops import leaky_relu
 except ImportError:
@@ -478,7 +474,7 @@ class AWLSTM:
         sess.close()
         tf.reset_default_graph()
 
-    def train(self, tune_para=False, perf=False):
+    def train(self, tune_para=False):
         self.construct_graph()
 
         sess = tf.Session()
@@ -596,10 +592,7 @@ class AWLSTM:
         tf.reset_default_graph()
         if tune_para:
             return best_valid_perf, best_test_perf
-        if perf:
-            return best_valid_perf, best_test_perf
-        else:
-            return best_valid_pred, best_test_pred
+        return best_valid_pred, best_test_pred
 
     def update_model(self, parameters):
         data_update = False
@@ -660,18 +653,6 @@ if __name__ == '__main__':
     parser.add_argument('-rl', '--reload', type=int, default=0,
                         help='use pre-trained parameters')
     args = parser.parse_args()
-    #-a
-    #args.att = 0
-    #-l
-    #args.seq = 10
-    #-u
-    #args.unit = 32
-    #-l2
-    #args.alpha_l2 = 10
-    #-f
-    #args.fix_init = 1  
-    #args.action = 'replicate'
-    
     print(args)
 
     parameters = {
@@ -682,7 +663,7 @@ if __name__ == '__main__':
         'eps': float(args.epsilon_adv),
         'lr': float(args.learning_rate)
     }
-    
+
     if 'stocknet' in args.path:
         tra_date = '2014-01-02'
         val_date = '2015-08-03'
@@ -708,7 +689,7 @@ if __name__ == '__main__':
     )
 
     if args.action == 'train':
-        pure_LSTM.train()      
+        pure_LSTM.train()
     elif args.action == 'test':
         pure_LSTM.test()
     elif args.action == 'report':
@@ -720,47 +701,3 @@ if __name__ == '__main__':
         pure_LSTM.predict_adv()
     elif args.action == 'latent':
         pure_LSTM.get_latent_rep()
-    elif args.action == 'replicate':
-        if args.adv == 1:
-            method = "Adv-ALSTM"
-        elif args.att == 0 and args.seq == 10 and args.unit == 32 and args.alpha_l2 == 10 and args.fix_init == 1 :
-            method = "LSTM"
-        elif args.att == 0 and args.seq == 5 and args.unit == 4 and args.alpha_l2 == 0.001 and args.fix_init == 1 :
-            method = "LSTM"
-        elif args.seq == 5 and args.unit == 4 and args.alpha_l2 == 1 and args.fix_init == 1 :
-            method = "ALSTM"
-        elif args.seq == 15 and args.unit == 16 and args.alpha_l2 == 0.001 and args.fix_init == 1 :
-            method = "ALSTM"
-
-        dataset = 'stocknet' if 'stocknet' in args.path else 'kdd17' if 'kdd17' in args.path else ''
-        
-        #ax = perf_df.plot()
-        #fig = ax.get_figure()
-        #fig.savefig('replication/perf.png')
-                                
-        best_valid_pred, best_test_pred = pure_LSTM.train(perf=True)
-        perf_dict = {
-                'method': [method],
-                'dataset': [dataset],
-                'acc': [best_test_pred['acc'] * 100],
-                'mcc': [best_test_pred['mcc']]
-            }
-
-        df = pd.DataFrame(perf_dict)
-            
-        if exists('replication/perf.csv'):
-            perf_df = pd.read_csv('replication/perf.csv')             
-            # perf_df = pd.merge(left=perf_df, right=df, 
-            #           how='outer',
-            #           on=('method', 'dataset')
-            #          )
-            perf_df = perf_df.drop(perf_df[(perf_df['method'] == method) & (perf_df['dataset'] == dataset)].index)
-            perf_df = pd.concat([perf_df, df])            
-            perf_df.to_csv('replication/perf.csv', index = False)
-            dfi.export(perf_df,"replication/perf.png")
-        else:
-            if not os.path.exists('replication'):
-                os.mkdir('replication')
-            df.to_csv('replication/perf.csv', index = False)
-            dfi.export(df,"replication/perf.png")
-
