@@ -25,6 +25,8 @@ def evaluate(prediction, ground_truth, hinge=False, reg=False):
         np.savetxt('prediction', pred, delimiter=',')
         exit(0)
     performance['mcc'] = matthews_corrcoef(ground_truth, pred)
+    performance['gt'] = ground_truth
+    performance['pred'] = pred
     return performance
 
 
