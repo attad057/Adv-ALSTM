@@ -482,10 +482,10 @@ class AWLSTM:
         sess.close()
         tf.reset_default_graph()
 
-    def train(self, tune_para=False, perf=False, evaluate=False):
+    def train(self, tune_para=False, perf=False, evaluate_average=False):
 
-        if evaluate == True:
-            runs = 2
+        if evaluate_average == True:
+            runs = 20
             runs_test_per_dict = {
             }
             runs_test_loss_dict = {
@@ -493,7 +493,15 @@ class AWLSTM:
         else:
             runs = 1
 
-        for i in range(*range(runs)):
+        best_valid_perf = {
+            'acc': 0, 'mcc': -2
+        }
+        best_test_perf = {
+            'acc': 0, 'mcc': -2
+        }
+        runs_arr = [*range(runs + 1)][1:]
+        for i in runs_arr:
+            print('----->>>>> Run:' + str(i))
 
             self.construct_graph()
 
@@ -507,13 +515,6 @@ class AWLSTM:
 
             best_valid_pred = np.zeros(self.val_gt.shape, dtype=float)
             best_test_pred = np.zeros(self.tes_gt.shape, dtype=float)
-
-            best_valid_perf = {
-                'acc': 0, 'mcc': -2
-            }
-            best_test_perf = {
-                'acc': 0, 'mcc': -2
-            }
 
             bat_count = self.tra_pv.shape[0] // self.batch_size
             if not (self.tra_pv.shape[0] % self.batch_size == 0):
@@ -586,7 +587,11 @@ class AWLSTM:
                     (self.loss, self.pred), feed_dict
                 )
                 cur_valid_perf = evaluate(val_pre, self.val_gt, self.hinge)
-                print('\tVal per:', cur_valid_perf, '\tVal loss:', val_loss)
+                cur_valid_perf_p = {
+                    'acc': cur_valid_perf['acc'],
+                    'mcc': cur_valid_perf['mcc']
+                }
+                print('\tVal per:', cur_valid_perf_p, '\tVal loss:', val_loss)
 
                 # test on testing set
                 feed_dict = {
@@ -598,9 +603,13 @@ class AWLSTM:
                     (self.loss, self.pred), feed_dict
                 )
                 cur_test_perf = evaluate(tes_pre, self.tes_gt, self.hinge)
-                print('\tTest per:', cur_test_perf, '\tTest loss:', test_loss)
+                cur_test_perf_p = {
+                    'acc': cur_test_perf['acc'],
+                    'mcc': cur_test_perf['mcc']
+                }
+                print('\tTest per:', cur_test_perf_p, '\tTest loss:', test_loss)
                 
-                if evaluate == True:
+                if evaluate_average == True:
                     if str(i) not in runs_test_per_dict:
                         runs_test_per_dict[str(i)] = []
                     if str(i) not in runs_test_loss_dict:
@@ -623,28 +632,55 @@ class AWLSTM:
             
             # training performance
 
+            best_valid_perf_p = {
+                'acc': best_valid_perf['acc'],
+                'mcc': best_valid_perf['mcc']
+            }
 
-            print('\nBest Valid performance:', best_valid_perf)
-            print('\tBest Test performance:', best_test_perf)
+            best_test_perf_p = {
+                'acc': best_test_perf['acc'],
+                'mcc': best_test_perf['mcc']
+            }
+            print('\nBest Valid performance:', best_valid_perf_p)
+            print('\tBest Test performance:', best_test_perf_p)
             sess.close()
             tf.reset_default_graph()
 
-        if evaluate == True:
-            runs_test_loss_avg = 
+        if evaluate_average == True:
+            runs_test_loss_avg = []
+            for r in runs_test_loss_dict:
+                runs_test_loss_avg.append(np.average(np.array(runs_test_loss_dict[r])))
+            
+            runs_test_perf_acc_avg = []
+            runs_test_perf_mcc_avg = []
+            for r in runs_test_per_dict:
+                acc_list = list(map(lambda x: x['acc'], runs_test_per_dict[r]))
+                mcc_list = list(map(lambda x: x['mcc'], runs_test_per_dict[r]))
+                runs_test_perf_acc_avg.append(np.average(np.array(acc_list)))
+                runs_test_perf_mcc_avg.append(np.average(np.array(mcc_list)))
+
             fig, ax = plt.subplots(1,3,figsize=(15,5))
-            ax[0].plot(epochs_arr, runs_test_loss_dict, 'b')
-            ax[0].set_title('Test loss for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+            ax[0].plot(epochs_arr, runs_test_loss_avg, 'b')
+            ax[0].set_title('Test average loss for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
             ax[0].set_xlabel('Epochs')
             ax[0].set_ylabel('Loss')
-            ax[1].plot(epochs_arr, list(map(lambda x: x['acc'], runs_test_per_dict)), 'r')
-            ax[1].set_title('Test ACC for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+            ax[1].plot(epochs_arr, runs_test_perf_acc_avg, 'r')
+            ax[1].set_title('Test average ACC for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
             ax[1].set_xlabel('Epochs')
             ax[1].set_ylabel('ACC')
-            ax[2].plot(epochs_arr, list(map(lambda x: x['mcc'], runs_test_per_dict)), 'r')
-            ax[2].set_title('Test MCC for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+            ax[2].plot(epochs_arr, runs_test_perf_mcc_avg, 'r')
+            ax[2].set_title('Test average MCC for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
             ax[2].set_xlabel('Epochs')
             ax[2].set_ylabel('MCC');
-            plt.savefig('replication/test_loss_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
+            plt.savefig('replication/test_average_loss_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
+
+
+            fig, ax = plt.subplots(1,1,figsize=(15,5))
+            ax[0].plot(epochs_arr, runs_test_loss_avg, 'b')
+            ax[0].set_title('Test average loss for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+            ax[0].set_xlabel('X')
+            ax[0].set_ylabel('Y')
+            plt.savefig('replication/test_average_loss_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
         if tune_para:
             return best_valid_perf, best_test_perf
         if perf:
@@ -790,7 +826,7 @@ if __name__ == '__main__':
         #fig = ax.get_figure()
         #fig.savefig('replication/perf.png')
                                 
-        best_valid_pred, best_test_pred = pure_LSTM.train(perf=True, plot=True)
+        best_valid_pred, best_test_pred = pure_LSTM.train(perf=True, evaluate_average=True)
         perf_dict = {
                 'method': [method],
                 'dataset': [dataset],
