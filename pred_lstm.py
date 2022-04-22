@@ -500,8 +500,8 @@ class AWLSTM:
             'acc': 0, 'mcc': -2
         }
         runs_arr = [*range(runs + 1)][1:]
-        for i in runs_arr:
-            print('----->>>>> Run:' + str(i))
+        for r in runs_arr:
+            print('----->>>>> Run:' + str(r))
 
             self.construct_graph()
 
