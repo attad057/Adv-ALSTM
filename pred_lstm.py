@@ -31,7 +31,7 @@ class AWLSTM:
     def __init__(self, data_path, model_path, model_save_path, parameters, steps=1, epochs=50,
                  batch_size=256, gpu=False, tra_date='2014-01-02',
                  val_date='2015-08-03', tes_date='2015-10-01', att=0, hinge=0,
-                 fix_init=0, adv=0, reload=0):
+                 fix_init=0, adv=0, reload=0, use_dropout_wrapper=0):
         self.data_path = data_path
         self.model_path = model_path
         self.model_save_path = model_save_path
@@ -62,7 +62,11 @@ class AWLSTM:
         if reload == 1:
             self.reload = True
         else:
-            self.reload = False
+            self.reload = False       
+        if use_dropout_wrapper == 1:
+            self.use_dropout_wrapper = True
+        else:
+            self.use_dropout_wrapper = False      
 
         # load data
         self.tra_date = tra_date
@@ -147,24 +151,27 @@ class AWLSTM:
                 tf.float32, [None, self.paras['seq'], 5]
             )
 
-            self.lstm_cell = tf.contrib.rnn.BasicLSTMCell(
-                self.paras['unit']
-            )
-
-            #dropout_rate = 0.05
-            #self.lstm_cell = tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.BasicLSTMCell(self.paras['unit'])
-            #                                                ,output_keep_prob=dropout_rate)
-            # self.outputs, _ = tf.nn.dynamic_rnn(
-            #     # self.outputs, _ = tf.nn.static_rnn(
-            #     self.lstm_cell, self.pv_var, dtype=tf.float32
-            #     # , initial_state=ini_sta
-            # )
+            if self.use_dropout_wrapper == True:
+                output_keep_prob = 1
+                state_keep_prob = 0.05
+                print('using dropout wrapper')
+                self.lstm_cell = tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.BasicLSTMCell(self.paras['unit']), state_keep_prob=state_keep_prob, output_keep_prob=output_keep_prob) 
+            else:       
+                print('using basic lstm cell')
+                self.lstm_cell = tf.contrib.rnn.BasicLSTMCell(self.paras['unit'])
 
             self.in_lat = tf.layers.dense(
                 self.pv_var, units=self.fea_dim,
                 activation=tf.nn.tanh, name='in_fc',
                 kernel_initializer=tf.glorot_uniform_initializer()
             )
+
+            # self.in_lat = tf.contrib.rnn.DropoutWrapper(tf.layers.dense(
+            #     self.pv_var, units=self.fea_dim,
+            #     activation=tf.nn.tanh, name='in_fc',
+            #     kernel_initializer=tf.glorot_uniform_initializer(),
+            #     trainable=True
+            # ),output_keep_prob=output_keep_prob, state_keep_prob=state_keep_prob)
 
             self.outputs, _ = tf.nn.dynamic_rnn(
                 # self.outputs, _ = tf.nn.static_rnn(
@@ -482,10 +489,11 @@ class AWLSTM:
         sess.close()
         tf.reset_default_graph()
 
-    def train(self, tune_para=False, perf=False, evaluate_average=False):
+    def train(self, tune_para=False, perf=False, evaluation=False):
 
-        if evaluate_average == True:
-            runs = 20
+        if evaluation == True:
+            runs = 10
+            self.epochs = 150
             runs_test_per_dict = {
             }
             runs_test_loss_dict = {
@@ -501,7 +509,7 @@ class AWLSTM:
         }
         runs_arr = [*range(runs + 1)][1:]
         for r in runs_arr:
-            print('----->>>>> Run:' + str(r))
+            print('->>>>> Run:' + str(r))
 
             self.construct_graph()
 
@@ -519,8 +527,6 @@ class AWLSTM:
             bat_count = self.tra_pv.shape[0] // self.batch_size
             if not (self.tra_pv.shape[0] % self.batch_size == 0):
                 bat_count += 1
-
-            #self.epochs = 10;
     
             epochs_arr = [*range(self.epochs + 1)][1:]
 
@@ -609,7 +615,7 @@ class AWLSTM:
                 }
                 print('\tTest per:', cur_test_perf_p, '\tTest loss:', test_loss)
                 
-                if evaluate_average == True:
+                if evaluation == True:
                     if str(i) not in runs_test_per_dict:
                         runs_test_per_dict[str(i)] = []
                     if str(i) not in runs_test_loss_dict:
@@ -646,7 +652,7 @@ class AWLSTM:
             sess.close()
             tf.reset_default_graph()
 
-        if evaluate_average == True:
+        if evaluation == True:
             runs_test_loss_avg = []
             for r in runs_test_loss_dict:
                 runs_test_loss_avg.append(np.average(np.array(runs_test_loss_dict[r])))
@@ -661,26 +667,42 @@ class AWLSTM:
 
             fig, ax = plt.subplots(1,3,figsize=(15,5))
             ax[0].plot(epochs_arr, runs_test_loss_avg, 'b')
-            ax[0].set_title('Test average loss for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+            ax[0].set_title('Average loss for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
             ax[0].set_xlabel('Epochs')
             ax[0].set_ylabel('Loss')
             ax[1].plot(epochs_arr, runs_test_perf_acc_avg, 'r')
-            ax[1].set_title('Test average ACC for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+            ax[1].set_title('Average ACC for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
             ax[1].set_xlabel('Epochs')
             ax[1].set_ylabel('ACC')
             ax[2].plot(epochs_arr, runs_test_perf_mcc_avg, 'r')
-            ax[2].set_title('Test average MCC for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+            ax[2].set_title('Average MCC for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
             ax[2].set_xlabel('Epochs')
-            ax[2].set_ylabel('MCC');
-            plt.savefig('replication/test_average_loss_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
+            ax[2].set_ylabel('MCC')
+            plt.savefig('replication/average_loss_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
 
+            pred_list = list(map(lambda x: x['pred'], runs_test_per_dict[str(self.epochs)]))
+            ##shape runs/batch_count/gt
+            runs_test_perf_pred = np.array(pred_list)   
+            pred_mean = np.mean(runs_test_perf_pred, axis=0).flatten()[:100]
+            pred_std = np.std(runs_test_perf_pred, axis=0).flatten()[:100]
+            shape_pred = [*range(runs_test_perf_pred.shape[1])][:100]
+            avg_pred_std = np.mean(np.std(runs_test_perf_pred, axis=0).flatten())
+            print('Average std: ' + str(avg_pred_std))
 
             fig, ax = plt.subplots(1,1,figsize=(15,5))
-            ax[0].plot(epochs_arr, runs_test_loss_avg, 'b')
-            ax[0].set_title('Test average loss for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
-            ax[0].set_xlabel('X')
-            ax[0].set_ylabel('Y')
-            plt.savefig('replication/test_average_loss_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
+            ax.scatter(shape_pred, pred_mean, color = 'blue')
+            ax.errorbar(shape_pred, pred_mean, yerr=pred_std, fmt='.', color='orange', label='uncertainty')
+            ax.set_xlabel('X')
+            ax.set_ylabel('Y')
+            if self.use_dropout_wrapper == True:
+                ax.set_title('Average uncertainty with dropout for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+                plt.savefig('replication/average_uncertainty_dropout_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
+                print('saved to replication/average_uncertainty_dropout_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
+            else:
+                ax.set_title('Average uncertainty for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+                plt.savefig('replication/average_uncertainty_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
+                print('saved to replication/average_uncertainty_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
+
         if tune_para:
             return best_valid_perf, best_test_perf
         if perf:
@@ -731,7 +753,7 @@ if __name__ == '__main__':
     parser.add_argument('-qs', '--model_save_path', type=str, help='path to save model',
                         default='./tmp/model')
     parser.add_argument('-o', '--action', type=str, default='train',
-                        help='train, test, pred')
+                        help='train, test, pred, replicate')
     parser.add_argument('-m', '--model', type=str, default='pure_lstm',
                         help='pure_lstm, di_lstm, att_lstm, week_lstm, aw_lstm')
     parser.add_argument('-f', '--fix_init', type=int, default=0,
@@ -746,6 +768,8 @@ if __name__ == '__main__':
                         help='use hinge lose')
     parser.add_argument('-rl', '--reload', type=int, default=0,
                         help='use pre-trained parameters')
+    parser.add_argument('-dw', '--dropout_wrapper', type=int, default=0,
+                    help='use dropout wrapper')
     args = parser.parse_args()
     #-a
     args.att = 0
@@ -758,7 +782,8 @@ if __name__ == '__main__':
     #-f
     args.fix_init = 1  
     args.action = 'replicate'
-    
+    args.dropout_wrapper = 1
+
     print(args)
     if args.adv == 1:
         method = "Adv-ALSTM"
@@ -805,7 +830,8 @@ if __name__ == '__main__':
         epochs=args.epoch, batch_size=args.batch_size, gpu=args.gpu,
         tra_date=tra_date, val_date=val_date, tes_date=tes_date, att=args.att,
         hinge=args.hinge_lose, fix_init=args.fix_init, adv=args.adv,
-        reload=args.reload
+        reload=args.reload,
+        use_dropout_wrapper = args.dropout_wrapper
     )
 
     if args.action == 'train':
@@ -822,11 +848,7 @@ if __name__ == '__main__':
     elif args.action == 'latent':
         pure_LSTM.get_latent_rep()
     elif args.action == 'replicate':       
-        #ax = perf_df.plot()
-        #fig = ax.get_figure()
-        #fig.savefig('replication/perf.png')
-                                
-        best_valid_pred, best_test_pred = pure_LSTM.train(perf=True, evaluate_average=True)
+        best_valid_pred, best_test_pred = pure_LSTM.train(perf=True, evaluation=True)
         perf_dict = {
                 'method': [method],
                 'dataset': [dataset],
@@ -838,10 +860,6 @@ if __name__ == '__main__':
             
         if exists('replication/perf.csv'):
             perf_df = pd.read_csv('replication/perf.csv')             
-            # perf_df = pd.merge(left=perf_df, right=df, 
-            #           how='outer',
-            #           on=('method', 'dataset')
-            #          )
             perf_df = perf_df.drop(perf_df[(perf_df['method'] == method) & (perf_df['dataset'] == dataset)].index)
             perf_df = pd.concat([perf_df, df])            
             perf_df.to_csv('replication/perf.csv', index = False)
