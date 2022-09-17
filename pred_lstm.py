@@ -489,7 +489,7 @@ class AWLSTM:
         sess.close()
         tf.reset_default_graph()
 
-    def train(self, tune_para=False, benchmark=False, experiment1=False):
+    def train(self, tune_para=False, return_perf=False, experiment1=False):
 
         if experiment1 == True:
             runs = 10
@@ -665,47 +665,45 @@ class AWLSTM:
                 runs_test_perf_acc_avg.append(np.average(np.array(acc_list)))
                 runs_test_perf_mcc_avg.append(np.average(np.array(mcc_list)))
 
-            fig, ax = plt.subplots(1,3,figsize=(15,5))
-            ax[0].plot(epochs_arr, runs_test_loss_avg, 'b')
-            ax[0].set_title('Average loss for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
-            ax[0].set_xlabel('Epochs')
-            ax[0].set_ylabel('Loss')
-            ax[1].plot(epochs_arr, runs_test_perf_acc_avg, 'r')
-            ax[1].set_title('Average ACC for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
-            ax[1].set_xlabel('Epochs')
-            ax[1].set_ylabel('ACC')
-            ax[2].plot(epochs_arr, runs_test_perf_mcc_avg, 'r')
-            ax[2].set_title('Average MCC for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
-            ax[2].set_xlabel('Epochs')
-            ax[2].set_ylabel('MCC')
-            plt.savefig('replication/average_loss_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
+            # fig, ax = plt.subplots(1,3,figsize=(15,5))
+            # ax[0].plot(epochs_arr, runs_test_loss_avg, 'b')
+            # ax[0].set_title('Average loss for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+            # ax[0].set_xlabel('Epochs')
+            # ax[0].set_ylabel('Loss')
+            # ax[1].plot(epochs_arr, runs_test_perf_acc_avg, 'r')
+            # ax[1].set_title('Average ACC for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+            # ax[1].set_xlabel('Epochs')
+            # ax[1].set_ylabel('ACC')
+            # ax[2].plot(epochs_arr, runs_test_perf_mcc_avg, 'r')
+            # ax[2].set_title('Average MCC for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+            # ax[2].set_xlabel('Epochs')
+            # ax[2].set_ylabel('MCC')
+            # plt.savefig('replication/average_loss_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
 
             pred_list = list(map(lambda x: x['pred'], runs_test_per_dict[str(self.epochs)]))
-            ##shape runs/batch_count/gt
-            runs_test_perf_pred = np.array(pred_list)   
-            pred_mean = np.mean(runs_test_perf_pred, axis=0).flatten()[:100]
-            pred_std = np.std(runs_test_perf_pred, axis=0).flatten()[:100]
-            shape_pred = [*range(runs_test_perf_pred.shape[1])][:100]
-            avg_pred_std = np.mean(np.std(runs_test_perf_pred, axis=0).flatten())
+            # ##shape runs/batch_count/gt
+            runs_test_pred = np.array(pred_list)   
+            pred_mean = np.mean(runs_test_pred, axis=0).flatten()[:100]
+            pred_std = np.std(runs_test_pred, axis=0).flatten()[:100]
+            shape_pred = [*range(runs_test_pred.shape[1])][:100]
+            avg_pred_std = np.mean(np.std(runs_test_pred, axis=0).flatten())
             print('Average std: ' + str(avg_pred_std))
 
-            fig, ax = plt.subplots(1,1,figsize=(15,5))
-            ax.scatter(shape_pred, pred_mean, color = 'blue')
-            ax.errorbar(shape_pred, pred_mean, yerr=pred_std, fmt='.', color='orange', label='uncertainty')
-            ax.set_xlabel('X')
-            ax.set_ylabel('Y')
-            if self.use_dropout_wrapper == True:
-                ax.set_title('Average uncertainty with dropout for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
-                plt.savefig('replication/average_uncertainty_dropout_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
-                print('saved to replication/average_uncertainty_dropout_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
-            else:
-                ax.set_title('Average uncertainty for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
-                plt.savefig('replication/average_uncertainty_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
-                print('saved to replication/average_uncertainty_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
+            # fig, ax = plt.subplots(1,1,figsize=(15,5))
+            # ax.scatter(shape_pred, pred_mean, color = 'blue')
+            # ax.errorbar(shape_pred, pred_mean, yerr=pred_std, fmt='.', color='orange', label='uncertainty')
+            # ax.set_xlabel('X')
+            # ax.set_ylabel('Y')
+            # if self.use_dropout_wrapper == True:
+            #     ax.set_title('Average uncertainty with dropout for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+            #     plt.savefig('replication/average_uncertainty_dropout_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
+            #     print('saved to replication/average_uncertainty_dropout_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
+            # else:
+            #     ax.set_title('Average uncertainty for ' + self.paras['meth'] + ', on dataset ' + self.paras['data'])
+            #     plt.savefig('replication/average_uncertainty_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
+            #     print('saved to replication/average_uncertainty_perf_' + self.paras['meth'] + '_' + self.paras['data'] + '.png')
 
-        if tune_para:
-            return best_valid_perf, best_test_perf
-        if benchmark:
+        if tune_para or return_perf== True:
             return best_valid_perf, best_test_perf
         else:
             return best_valid_pred, best_test_pred
@@ -985,7 +983,7 @@ if __name__ == '__main__':
                 use_dropout_wrapper = args.dropout_wrapper
             )
 
-            best_valid_pred, best_test_pred = pure_LSTM.train(benchmark=True)
+            best_valid_pred, best_test_pred = pure_LSTM.train(return_perf=True)
             perf_dict = {
                     'method': [method],
                     'dataset': [dataset],
