@@ -489,9 +489,9 @@ class AWLSTM:
         sess.close()
         tf.reset_default_graph()
 
-    def train(self, tune_para=False, perf=False, evaluation=False):
+    def train(self, tune_para=False, benchmark=False, experiment1=False):
 
-        if evaluation == True:
+        if experiment1 == True:
             runs = 10
             self.epochs = 150
             runs_test_per_dict = {
@@ -615,7 +615,7 @@ class AWLSTM:
                 }
                 print('\tTest per:', cur_test_perf_p, '\tTest loss:', test_loss)
                 
-                if evaluation == True:
+                if experiment1 == True:
                     if str(i) not in runs_test_per_dict:
                         runs_test_per_dict[str(i)] = []
                     if str(i) not in runs_test_loss_dict:
@@ -652,7 +652,7 @@ class AWLSTM:
             sess.close()
             tf.reset_default_graph()
 
-        if evaluation == True:
+        if experiment1 == True:
             runs_test_loss_avg = []
             for r in runs_test_loss_dict:
                 runs_test_loss_avg.append(np.average(np.array(runs_test_loss_dict[r])))
@@ -705,7 +705,7 @@ class AWLSTM:
 
         if tune_para:
             return best_valid_perf, best_test_perf
-        if perf:
+        if benchmark:
             return best_valid_perf, best_test_perf
         else:
             return best_valid_pred, best_test_pred
@@ -768,52 +768,20 @@ if __name__ == '__main__':
                         help='use hinge lose')
     parser.add_argument('-rl', '--reload', type=int, default=0,
                         help='use pre-trained parameters')
-    parser.add_argument('-dw', '--dropout_wrapper', type=int, default=0,
+    parser.add_argument('-dw', '--dropout_wrapper', type=bool, default=0,
                     help='use dropout wrapper')
     args = parser.parse_args()
-    #-a
-    args.att = 0
-    #-l
-    args.seq = 10
-    #-u
-    args.unit = 32
-    #-l2
-    args.alpha_l2 = 10
-    #-f
-    args.fix_init = 1  
-    args.action = 'replicate'
-    args.dropout_wrapper = 1
 
-    print(args)
-    if args.adv == 1:
-        method = "Adv-ALSTM"
-    elif args.att == 0 and args.seq == 10 and args.unit == 32 and args.alpha_l2 == 10 and args.fix_init == 1 :
-        method = "LSTM"
-    elif args.att == 0 and args.seq == 5 and args.unit == 4 and args.alpha_l2 == 0.001 and args.fix_init == 1 :
-        method = "LSTM"
-    elif args.seq == 5 and args.unit == 4 and args.alpha_l2 == 1 and args.fix_init == 1 :
-        method = "ALSTM"
-    elif args.seq == 15 and args.unit == 16 and args.alpha_l2 == 0.001 and args.fix_init == 1 :
-        method = "ALSTM"
-
+    args.action = 'benchmark'
+    #args.dropout_wrapper = 1
     dataset = 'stocknet' if 'stocknet' in args.path else 'kdd17' if 'kdd17' in args.path else ''
-    parameters = {
-        'seq': int(args.seq),
-        'unit': int(args.unit),
-        'alp': float(args.alpha_l2),
-        'bet': float(args.beta_adv),
-        'eps': float(args.epsilon_adv),
-        'lr': float(args.learning_rate),
-        'meth': method,
-        'data': dataset,
-        'act': args.action
-    }
-    
-    if 'stocknet' in args.path:
+    method = ''
+
+    if dataset == 'stocknet':
         tra_date = '2014-01-02'
         val_date = '2015-08-03'
         tes_date = '2015-10-01'
-    elif 'kdd17' in args.path:
+    elif dataset == 'kdd17':
         tra_date = '2007-01-03'
         val_date = '2015-01-02'
         tes_date = '2016-01-04'
@@ -821,52 +789,257 @@ if __name__ == '__main__':
         print('unexpected path: %s' % args.path)
         exit(0)
 
-    pure_LSTM = AWLSTM(
-        data_path=args.path,
-        model_path=args.model_path,
-        model_save_path=args.model_save_path,
-        parameters=parameters,
-        steps=args.step,
-        epochs=args.epoch, batch_size=args.batch_size, gpu=args.gpu,
-        tra_date=tra_date, val_date=val_date, tes_date=tes_date, att=args.att,
-        hinge=args.hinge_lose, fix_init=args.fix_init, adv=args.adv,
-        reload=args.reload,
-        use_dropout_wrapper = args.dropout_wrapper
-    )
+    if args.action == 'benchmark':
+        predefined_args = [{
+            #-p
+            'path': './data/stocknet-dataset/price/ourpped',
+            #-a
+            'att': 0,
+            #-l
+            'seq': 10,
+            #-u
+            'unit': 32,
+            #-l2
+            'alpha_l2': 10,
+            #-f
+            'fix_init': 1,
+            #-v
+            'adv': 0,
+            #-rl
+            'reload': 0,
+            #-la
+            'beta_adv': 1e-2,
+            #-le
+            'epsilon_adv': 1e-2,
+            #-q
+            'model_path': './saved_model/acl18_alstm/exp',
+            'method': 'LSTM',
+            'dataset': 'stocknet'
+        },  
+        {
+            #-p
+            'path': './data/stocknet-dataset/price/ourpped',
+            #-a
+            'att': 1,
+            #-l
+            'seq': 5,
+            #-u
+            'unit': 4,
+            #-l2
+            'alpha_l2': 1,
+            #-f
+            'fix_init': 1,
+            #-v
+            'adv': 0,
+            #-rl
+            'reload': 0,
+            #-la
+            'beta_adv': 1e-2,
+            #-le
+            'epsilon_adv': 1e-2,
+            #-q
+            'model_path': './saved_model/acl18_alstm/exp',
+            'method': 'ALSTM',
+            'dataset': 'stocknet'
+        },
+        {
+            #-p
+            'path': './data/stocknet-dataset/price/ourpped',
+            #-a
+            'att': 1,
+            #-l
+            'seq': 5,
+            #-u
+            'unit': 4,
+            #-l2
+            'alpha_l2': 1,
+            #-f
+            'fix_init': 0,
+            #-v
+            'adv': 1,
+            #-rl
+            'reload': 1,
+            #-la
+            'beta_adv': 0.01,
+            #-le
+            'epsilon_adv': 0.05,
+            'model_path': './saved_model/acl18_alstm/exp',
+            'method': 'Adv-ALSTM',
+            'dataset': 'stocknet'
+        },      
+        {
+            #-p
+            'path': './data/kdd17/ourpped/',
+            #-a
+            'att': 0,
+            #-l
+            'seq': 5,
+            #-u
+            'unit': 4,
+            #-l2
+            'alpha_l2': 0.001,
+            #-f
+            'fix_init': 1,
+            #-v
+            'adv': 0,
+            #-rl
+            'reload': 0,
+            #-la
+            'beta_adv': 1e-2,
+            #-le
+            'epsilon_adv': 1e-2,
+            #-q
+            'model_path': './saved_model/acl18_alstm/exp',
+            'method': 'LSTM',
+            'dataset': 'kdd17'
+        },  
+        {
+            #-p
+            'path': './data/kdd17/ourpped/',
+            #-a
+            'att': 1,
+            #-l
+            'seq': 15,
+            #-u
+            'unit': 16,
+            #-l2
+            'alpha_l2': 0.001,
+            #-f
+            'fix_init': 1,
+            #-v
+            'adv': 0,
+            #-rl
+            'reload': 0,
+            #-la
+            'beta_adv': 1e-2,
+            #-le
+            'epsilon_adv': 1e-2,
+            #-q
+            'model_path': './saved_model/acl18_alstm/exp',
+            'method': 'ALSTM',
+            'dataset': 'kdd17'
+        },
+        {
+            #-p
+            'path': './data/kdd17/ourpped/',
+            #-a
+            'att': 1,
+            #-l
+            'seq': 15,
+            #-u
+            'unit': 16,
+            #-l2
+            'alpha_l2': 0.001,
+            #-f
+            'fix_init': 1,
+            #-v
+            'adv': 1,
+            #-rl
+            'reload': 1,
+            #-la
+            'beta_adv': 0.05,
+            #-le
+            'epsilon_adv':  0.001,
+            'model_path': './saved_model/kdd17_alstm/model',
+            'method': 'Adv-ALSTM',
+            'dataset': 'kdd17'
+        }]
 
-    if args.action == 'train':
-        pure_LSTM.train()      
-    elif args.action == 'test':
-        pure_LSTM.test()
-    elif args.action == 'report':
-        for i in range(5):
-            pure_LSTM.train()
-    elif args.action == 'pred':
-        pure_LSTM.predict_record()
-    elif args.action == 'adv':
-        pure_LSTM.predict_adv()
-    elif args.action == 'latent':
-        pure_LSTM.get_latent_rep()
-    elif args.action == 'replicate':       
-        best_valid_pred, best_test_pred = pure_LSTM.train(perf=True, evaluation=True)
-        perf_dict = {
-                'method': [method],
-                'dataset': [dataset],
-                'acc': [best_test_pred['acc'] * 100],
-                'mcc': [best_test_pred['mcc']]
+        for pre in predefined_args:
+            args.path = './data/stocknet-dataset/price/ourpped'
+            args.att = pre['att']
+            args.seq = pre['seq']
+            args.unit = pre['unit']
+            args.alpha_l2 = pre['alpha_l2']
+            args.fix_init = pre['fix_init']
+            args.adv = pre['adv']
+            args.reload = pre['reload']
+            args.beta_adv = pre['beta_adv']
+            args.epsilon_adv = pre['epsilon_adv']
+            args.model_path = pre['model_path']
+            method = pre['method']
+            dataset = pre['dataset']
+       
+            parameters = {
+                'seq': int(args.seq),
+                'unit': int(args.unit),
+                'alp': float(args.alpha_l2),
+                'bet': float(args.beta_adv),
+                'eps': float(args.epsilon_adv),
+                'lr': float(args.learning_rate),
+                'meth': method,
+                'data': dataset,
+                'act': args.action
             }
+                    
+            pure_LSTM = AWLSTM(
+                data_path=args.path,
+                model_path=args.model_path,
+                model_save_path=args.model_save_path,
+                parameters=parameters,
+                steps=args.step,
+                epochs=args.epoch, batch_size=args.batch_size, gpu=args.gpu,
+                tra_date=tra_date, val_date=val_date, tes_date=tes_date, att=args.att,
+                hinge=args.hinge_lose, fix_init=args.fix_init, adv=args.adv,
+                reload=args.reload,
+                use_dropout_wrapper = args.dropout_wrapper
+            )
 
-        df = pd.DataFrame(perf_dict)
-            
-        if exists('replication/perf.csv'):
-            perf_df = pd.read_csv('replication/perf.csv')             
-            perf_df = perf_df.drop(perf_df[(perf_df['method'] == method) & (perf_df['dataset'] == dataset)].index)
-            perf_df = pd.concat([perf_df, df])            
-            perf_df.to_csv('replication/perf.csv', index = False)
-            dfi.export(perf_df,"replication/perf.png")
-        else:
-            if not os.path.exists('replication'):
-                os.mkdir('replication')
-            df.to_csv('replication/perf.csv', index = False)
-            dfi.export(df,"replication/perf.png")
+            best_valid_pred, best_test_pred = pure_LSTM.train(benchmark=True)
+            perf_dict = {
+                    'method': [method],
+                    'dataset': [dataset],
+                    'acc': [best_test_pred['acc'] * 100],
+                    'mcc': [best_test_pred['mcc']]
+                }
 
+            df = pd.DataFrame(perf_dict)
+                
+            if exists('replication/perf.csv'):
+                perf_df = pd.read_csv('replication/perf.csv')             
+                perf_df = perf_df.drop(perf_df[(perf_df['method'] == method) & (perf_df['dataset'] == dataset)].index)
+                perf_df = pd.concat([perf_df, df])            
+                perf_df.to_csv('replication/perf.csv', index = False)
+                dfi.export(perf_df,"replication/perf.png")
+            else:
+                if not os.path.exists('replication'):
+                    os.mkdir('replication')
+                df.to_csv('replication/perf.csv', index = False)
+                dfi.export(df,"replication/perf.png")
+    else:
+        print(args)
+
+        parameters = {
+                'seq': int(args.seq),
+                'unit': int(args.unit),
+                'alp': float(args.alpha_l2),
+                'bet': float(args.beta_adv),
+                'eps': float(args.epsilon_adv),
+                'lr': float(args.learning_rate),
+                'meth': method,
+                'data': dataset,
+                'act': args.action
+            }
+                    
+        pure_LSTM = AWLSTM(
+            data_path=args.path,
+            model_path=args.model_path,
+            model_save_path=args.model_save_path,
+            parameters=parameters,
+            steps=args.step,
+            epochs=args.epoch, batch_size=args.batch_size, gpu=args.gpu,
+            tra_date=tra_date, val_date=val_date, tes_date=tes_date, att=args.att,
+            hinge=args.hinge_lose, fix_init=args.fix_init, adv=args.adv,
+            reload=args.reload,
+            use_dropout_wrapper = args.dropout_wrapper
+        )
+        if args.action == 'train':
+                pure_LSTM.train()      
+        elif args.action == 'test':
+            pure_LSTM.test()
+        elif args.action == 'pred':
+            pure_LSTM.predict_record()
+        elif args.action == 'adv':
+            pure_LSTM.predict_adv()
+        elif args.action == 'latent':
+            pure_LSTM.get_latent_rep()
