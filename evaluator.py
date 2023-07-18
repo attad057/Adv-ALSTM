@@ -1,5 +1,5 @@
 import numpy as np
-from sklearn.metrics import accuracy_score, matthews_corrcoef, mean_squared_error, log_loss
+from sklearn.metrics import accuracy_score, matthews_corrcoef, mean_squared_error, log_loss, precision_score, recall_score
 
 
 def evaluate(prediction, ground_truth, hinge=False, reg=False, additional_metrics=False):

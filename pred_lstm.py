@@ -8,6 +8,8 @@ import tensorflow as tf
 from time import time
 import pandas as pd
 import dataframe_image as dfi
+from scipy.stats import entropy
+import pickle                    
 
 try:
     from tensorflow.python.ops.nn_ops import leaky_relu
@@ -401,13 +403,20 @@ class AWLSTM:
         #2555, 3000
         pre_arr_s = np.reshape(np.transpose(pre_np_arr), (pre_np_arr.shape[1], pre_np_arr.shape[0]))
         pre_avg = np.mean(pre_arr_s, axis = 1)
-        pre_avg_std = np.std(pre_arr_s, axis = 1)
-        pre_avg_round = np.reshape(np.round(pre_avg), (pre_np_arr.shape[1], pre_np_arr.shape[2]))
+        pre_std = np.std(pre_arr_s, axis = 1)
+        pre_entr = np.zeros((pre_std.shape[0]))
+
+        for i, x in enumerate(pre_arr_s):
+            value, counts = np.unique(x, return_counts=True)
+            entr = entropy(counts, base=None)
+            pre_entr[i] = entr
+        #pre_avg_round = np.reshape(np.round(pre_avg), (pre_np_arr.shape[1], pre_np_arr.shape[2]))
 
         #take best indexes from pre_np_arr
         # ind_rows = np.arange(pre_np_arr.shape[1])
         # pre = np.reshape(pre_arr_s[ind_rows, ind_columns], (pre_np_arr.shape[1], pre_np_arr.shape[2]))
-        return pre_avg_round, pre_avg_std
+        return np.reshape(pre_avg, (pre_np_arr.shape[1], pre_np_arr.shape[2])), [pre_std, pre_entr]
+
 
     def predict_adv(self):
         self.construct_graph()
@@ -718,8 +727,9 @@ class AWLSTM:
         else:
             return best_valid_pred, best_test_pred
 
-    def train_monte_carlo_dropout(self, tune_para=False, return_perf=False, return_pred=True, iterations=1, evaluate_last_epoch_only=False):
+    def train_monte_carlo_dropout(self, tune_para=False, return_perf=False, return_pred=True, iterations=1):
         iterations_arr = [*range(iterations + 1)][1:]
+       
         best_valid_perf = {
             'acc': 0, 'mcc': -2
         }
@@ -817,92 +827,86 @@ class AWLSTM:
                 self.output_keep_prob_var: self.output_keep_prob
             }
             
-            #We evaluate at last epoch due to performance issues
-            if i == self.epochs or evaluate_last_epoch_only == False:
-                for r in iterations_arr:
-                    val_loss, val_pre = sess.run(
-                        (self.loss, self.pred), feed_dict
-                    )               
-        
+            for r in iterations_arr:
+                val_loss, val_pre = sess.run(
+                    (self.loss, self.pred), feed_dict
+                )               
+    
                 val_l_arr.append(label(self.hinge, val_pre))
 
-                #shape (3720, 10)
-                val_l_np_arr = np.array(val_l_arr)
+            #shape (3720, 10)
+            val_l_np_arr = np.array(val_l_arr)
 
-                if self.dropout_activation_function == 'avg':
-                    val_pre, val_pre_prob = self.monte_carlo_average(val_l_np_arr)
-                elif self.dropout_activation_function == 'softmax':
-                    val_pre, val_pre_prob = self.monte_carlo_softmax(val_l_np_arr)
+            if self.dropout_activation_function == 'avg':
+                val_pre, val_pre_prob = self.monte_carlo_average(val_l_np_arr)                
 
-                cur_valid_perf = evaluate(val_pre, self.val_gt, self.hinge, additional_metrics=True)
-                cur_valid_perf['prob_arr'] = val_pre_prob
-                cur_valid_perf_p = {
-                    'acc': cur_valid_perf['acc'],
-                    'mcc': cur_valid_perf['mcc']
-                }
-                print('\tVal per:', cur_valid_perf_p, '\tVal loss:', val_loss, '\tVal state_keep_prob:', self.state_keep_prob)
+            cur_valid_perf = evaluate(val_pre, self.val_gt, self.hinge, additional_metrics=True)
+            cur_valid_perf['prob_arr'] = val_pre_prob
+            cur_valid_perf_p = {
+                'acc': cur_valid_perf['acc'],
+                'mcc': cur_valid_perf['mcc']
+            }
+            print('\tVal per:', cur_valid_perf_p, '\tVal loss:', val_loss, '\tVal state_keep_prob:', self.state_keep_prob)
 
-                # test on testing set
-                feed_dict = {
-                    self.pv_var: self.tes_pv,
-                    self.wd_var: self.tes_wd,
-                    self.gt_var: self.tes_gt,
-                    self.state_keep_prob_var: self.state_keep_prob,
-                    self.input_keep_prob_var: self.input_keep_prob,
-                    self.output_keep_prob_var: self.output_keep_prob
-                }
+            # test on testing set
+            feed_dict = {
+                self.pv_var: self.tes_pv,
+                self.wd_var: self.tes_wd,
+                self.gt_var: self.tes_gt,
+                self.state_keep_prob_var: self.state_keep_prob,
+                self.input_keep_prob_var: self.input_keep_prob,
+                self.output_keep_prob_var: self.output_keep_prob
+            }
 
-                test_l_arr = []
-                for r in iterations_arr:
-                    test_loss, tes_pre = sess.run(
-                        (self.loss, self.pred), feed_dict
-                    )
-                    test_l_arr.append(label(self.hinge, tes_pre))
-
-                #shape (3720, 10)
-                test_l_np_arr = np.array(test_l_arr)
-
-                if self.dropout_activation_function == 'avg':
-                    tes_pre, test_pre_prob = self.monte_carlo_average(test_l_np_arr)
-                elif self.dropout_activation_function == 'softmax':
-                    tes_pre, test_pre_prob = self.monte_carlo_softmax(test_l_np_arr)
-
-                cur_test_perf = evaluate(tes_pre, self.tes_gt, self.hinge, additional_metrics=True)
-                cur_test_perf['prob_arr'] = test_pre_prob
-
-                cur_test_perf_p = {
-                    'acc': cur_test_perf['acc'],
-                    'mcc': cur_test_perf['mcc']
-                }        
-    
-                print('\tTest per:', cur_test_perf_p, '\tTest loss:', test_loss, '\tTest state_keep_prob:', self.state_keep_prob)
-            
-                if cur_valid_perf['acc'] > best_valid_perf['acc']:
-                    best_valid_perf = copy.copy(cur_valid_perf)
-                    best_valid_pred = copy.copy(val_pre)
-                    best_test_perf = copy.copy(cur_test_perf)
-                    best_test_pred = copy.copy(tes_pre)
-                    if not tune_para:
-                        saver.save(sess, self.model_save_path)
-                self.tra_pv, self.tra_wd, self.tra_gt = shuffle(
-                    self.tra_pv, self.tra_wd, self.tra_gt, random_state=0
+            test_l_arr = []
+            for r in iterations_arr:
+                test_loss, tes_pre = sess.run(
+                    (self.loss, self.pred), feed_dict
                 )
-                t4 = time()
-                print('epoch:', i, ('time: %.4f ' % (t4 - t1)))
-            
-                # training performance
+                test_l_arr.append(label(self.hinge, tes_pre))
 
-                best_valid_perf_p = {
-                    'acc': best_valid_perf['acc'],
-                    'mcc': best_valid_perf['mcc']
-                }
+            #shape (3720, 10)
+            test_l_np_arr = np.array(test_l_arr)
 
-                best_test_perf_p = {
-                    'acc': best_test_perf['acc'],
-                    'mcc': best_test_perf['mcc']
-                }
-                print('\nBest Valid performance:', best_valid_perf_p)
-                print('\tBest Test performance:', best_test_perf_p)
+            if self.dropout_activation_function == 'avg':
+                tes_pre, test_pre_prob = self.monte_carlo_average(test_l_np_arr)
+
+            cur_test_perf = evaluate(tes_pre, self.tes_gt, self.hinge, additional_metrics=True)
+            cur_test_perf['prob_arr'] = test_pre_prob
+
+            cur_test_perf_p = {
+                'acc': cur_test_perf['acc'],
+                'mcc': cur_test_perf['mcc']
+            }        
+
+            print('\tTest per:', cur_test_perf_p, '\tTest loss:', test_loss, '\tTest state_keep_prob:', self.state_keep_prob)
+        
+            if cur_valid_perf['acc'] > best_valid_perf['acc']:
+                best_valid_perf = copy.copy(cur_valid_perf)
+                best_valid_pred = copy.copy(val_pre)
+                best_test_perf = copy.copy(cur_test_perf)
+                best_test_pred = copy.copy(tes_pre)
+                if not tune_para:
+                    saver.save(sess, self.model_save_path)
+            self.tra_pv, self.tra_wd, self.tra_gt = shuffle(
+                self.tra_pv, self.tra_wd, self.tra_gt, random_state=0
+            )
+            t4 = time()
+            print('epoch:', i, ('time: %.4f ' % (t4 - t1)))
+        
+            # training performance
+
+            best_valid_perf_p = {
+                'acc': best_valid_perf['acc'],
+                'mcc': best_valid_perf['mcc']
+            }
+
+            best_test_perf_p = {
+                'acc': best_test_perf['acc'],
+                'mcc': best_test_perf['mcc']
+            }
+            print('\nBest Valid performance:', best_valid_perf_p)
+            print('\tBest Test performance:', best_test_perf_p)
         sess.close()
         tf.reset_default_graph()
 
@@ -1258,7 +1262,7 @@ if __name__ == '__main__':
                     help='Apply dropout to each layer')
     args = parser.parse_args()
 
-    args.action = 'experiment1_dropout_convergence'
+    args.action = 'experiment1_dropout_uncertainty'
     #args.dropout_wrapper = 1
     dataset = 'stocknet' if 'stocknet' in args.path else 'kdd17' if 'kdd17' in args.path else ''
     method = ''
@@ -1611,10 +1615,9 @@ if __name__ == '__main__':
         }]
         perf_df = None
         perf_df2 = None
-        state_keep_prob_arr = [1]
-        dropout_iterations_arr = [[1, 1]]
-        #state_keep_prob_arr = [0.5, 0.05, 0.005, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95]
-        #dropout_iterations_arr = [[16000, 19000], [2500, 500], [500, 500], [12500, 500], [12500, 500], [18000, 750], [4000, 1250], [2500, 17250], [2500, 17000], [3750, 20500], [2250, 34000], [500, 9000]]
+
+        state_keep_prob_arr = [0.05, 0.1, 0.25, 0.5]
+
         for pre in predefined_args:
             args.path = pre['path']
             args.att = pre['att']
@@ -1641,12 +1644,9 @@ if __name__ == '__main__':
                 print('unexpected path: %s' % args.path)
                 exit(0)
 
+            dropout_iterations = 200
             for i, s in enumerate(state_keep_prob_arr):
                 args.state_keep_prob = s
-                if dataset == 'stocknet':
-                    dropout_iterations = dropout_iterations_arr[i][0]
-                elif dataset == 'kdd17':
-                    dropout_iterations = dropout_iterations_arr[i][1]
                 parameters = {
                     'seq': int(args.seq),
                     'unit': int(args.unit),
@@ -1660,10 +1660,25 @@ if __name__ == '__main__':
                     'state_keep_prob': args.state_keep_prob
                 }
                         
+                save_path = args.model_save_path.replace('/model', '') + '/' + dataset
+                if not os.path.exists(save_path):
+                    os.mkdir(save_path)
+                save_path = save_path + '/' + method
+                if not os.path.exists(save_path):
+                    os.mkdir(save_path)
+                save_path = save_path + '/' + str(args.state_keep_prob)
+                if not os.path.exists(save_path):
+                    os.mkdir(save_path)
+                save_path = save_path + '/' + str(dropout_iterations)
+                if not os.path.exists(save_path):
+                    os.mkdir(save_path)
+
+                model_save_path = save_path + '/model'
+
                 pure_LSTM = AWLSTM(
                     data_path=args.path,
                     model_path=args.model_path,
-                    model_save_path=args.model_save_path,
+                    model_save_path=model_save_path,
                     parameters=parameters,
                     steps=args.step,
                     epochs=args.epoch, batch_size=args.batch_size, gpu=args.gpu,
@@ -1678,22 +1693,50 @@ if __name__ == '__main__':
 
                 perf_valid_arr = []
                 perf_test_arr = []
-
                 for r in runs_arr:
-                    best_valid_perf, best_test_perf = pure_LSTM.train_monte_carlo_dropout(return_perf=True, return_pred=False, iterations=dropout_iterations, evaluate_last_epoch_only=False)
+                    run_save_path = save_path + '/' + str(r)
+
+                    if not os.path.exists(run_save_path):
+                        os.mkdir(run_save_path)  
+
+                    model_save_path = run_save_path + '/model'
+                    
+                    pure_LSTM.model_save_path = model_save_path
+                    best_valid_perf, best_test_perf = pure_LSTM.train_monte_carlo_dropout(return_perf=True, return_pred=False, iterations=dropout_iterations)
+
                     perf_valid_arr.append(best_valid_perf)
-                    perf_test_arr.append(best_test_perf)
+                    perf_test_arr.append(best_test_perf)    
+                    val_pre_std = best_valid_perf['prob_arr'][0]
+                    val_pre_entr = best_valid_perf['prob_arr'][1]
+                    tes_pre_std = best_test_perf['prob_arr'][0]
+                    tes_pre_entr = best_test_perf['prob_arr'][1]
+                 
+                    val_avg_std = np.average(val_pre_std)
+                    val_avg_entr = np.average(val_pre_entr)
+                    tes_avg_std = np.average(tes_pre_std)
+                    tes_avg_entr = np.average(tes_pre_entr)
+
                     perf_dict = {
                             'method': [method],
                             'dataset': [dataset],
                             'test acc': [best_test_perf['acc'] * 100],
                             'test mcc': [best_test_perf['mcc']],
                             'test ll': [best_test_perf['ll']],
+                            'test rs': [best_test_perf['rs']],
+                            'test ps' : [best_test_perf['ps']],
+                            'test avg std': [tes_avg_std],
+                            'test avg entr': [tes_avg_entr],
                             'valid acc': [best_valid_perf['acc'] * 100],
                             'valid mcc': [best_valid_perf['mcc']],
                             'valid ll': [best_valid_perf['ll']],
+                            'valid rs': [best_valid_perf['rs']],
+                            'valid ps' : [best_valid_perf['ps']],
+                            'valid avg std': [val_avg_std],
+                            'valid avg entr': [val_avg_entr],
                             'dropout' : [args.state_keep_prob],
-                            'run': [r]
+                            'run': [r],
+                            'iterations': [dropout_iterations],
+                            'run save path': [run_save_path]
                         }
 
                     df = pd.DataFrame(perf_dict)
@@ -1705,28 +1748,47 @@ if __name__ == '__main__':
                     if not os.path.exists('experiment1'):
                         os.mkdir('experiment1')
                     perf_df.to_csv('experiment1/perf_dropout_results.csv', index = False)
+                    
+                    with open(run_save_path + '/perf_df.pkl', 'wb') as perf_df_file:
+                        pickle.dump(perf_df, perf_df_file)
                     #dfi.export(perf_df,"experiment1/perf_dropout_results.png")
+
+                    with open(run_save_path + '/best_valid_perf.pkl', 'wb') as best_valid_perf_file:
+                        pickle.dump(best_valid_perf, best_valid_perf_file)
+                    with open(run_save_path + '/best_test_perf.pkl', 'wb') as best_test_perf_file:
+                        pickle.dump(best_test_perf, best_test_perf_file)
                     
                 valid_acc_list = list(map(lambda x: x['acc'], perf_valid_arr))
                 valid_mcc_list = list(map(lambda x: x['mcc'], perf_valid_arr))
                 valid_ll_list = list(map(lambda x: x['ll'], perf_valid_arr))
+                valid_rs_list = list(map(lambda x: x['rs'], perf_valid_arr))
+                valid_ps_list = list(map(lambda x: x['ps'], perf_valid_arr))
 
                 avg_valid_acc = np.average(np.array(valid_acc_list)) * 100
                 avg_valid_mcc = np.average(np.array(valid_mcc_list))
                 avg_valid_ll = np.average(np.array(valid_ll_list))
                 std_valid_ll = np.std(np.array(valid_ll_list), ddof=1) / np.sqrt(np.size(np.array(valid_ll_list)))
+                avg_valid_rs = np.average(np.array(valid_rs_list))
+                avg_valid_ps = np.average(np.array(valid_ps_list))
 
                 test_acc_list = list(map(lambda x: x['acc'], perf_test_arr))
                 test_mcc_list = list(map(lambda x: x['mcc'], perf_test_arr))
                 test_ll_list = list(map(lambda x: x['ll'], perf_test_arr))
+                test_rs_list = list(map(lambda x: x['rs'], perf_test_arr))
+                test_ps_list = list(map(lambda x: x['ps'], perf_test_arr))
 
                 avg_test_acc = np.average(np.array(test_acc_list)) * 100
                 avg_test_mcc = np.average(np.array(test_mcc_list))
                 avg_test_ll = np.average(np.array(test_ll_list))
-                std_test_ll= np.std(np.array(test_ll_list), ddof=1) / np.sqrt(np.size(np.array(test_ll_list)))
+                std_test_ll = np.std(np.array(test_ll_list), ddof=1) / np.sqrt(np.size(np.array(test_ll_list)))
+                avg_test_rs = np.average(np.array(test_rs_list))
+                avg_test_ps = np.average(np.array(test_ps_list))
+
                 avg_acc = np.average(np.array([avg_test_acc, avg_valid_acc]))
                 avg_mcc = np.average(np.array([avg_test_mcc, avg_valid_mcc]))
                 avg_std_err_ll = np.average(np.array([std_test_ll, std_valid_ll]))
+                avg_rs = np.average(np.array([avg_test_rs, avg_valid_rs]))
+                avg_ps = np.average(np.array([avg_test_ps, avg_valid_ps]))
 
                 perf_dict_2 = {
                             'method': [method],
@@ -1736,13 +1798,19 @@ if __name__ == '__main__':
                             'avg test mcc': [avg_test_mcc],
                             'avg test ll': [avg_test_ll],
                             'std error test ll': [std_test_ll],
+                            'avg test rs' : [avg_test_rs],
+                            'avg test ps' : [avg_test_ps],
                             'avg valid acc': [avg_valid_acc],
                             'avg valid mcc': [avg_valid_mcc],
                             'avg valid ll': [avg_valid_ll],
                             'std error valid ll': [std_valid_ll],
+                            'avg valid rs' : [avg_valid_rs],
+                            'avg valid ps' : [avg_valid_ps],
                             'avg acc': [avg_acc],
                             'avg mcc': [avg_mcc],
-                            'avg std error ll': [avg_std_err_ll]
+                            'avg std error ll': [avg_std_err_ll],
+                            'avg rs' : [avg_rs],
+                            'avg ps' : [avg_ps]
                         }
 
                 df_2 = pd.DataFrame(perf_dict_2)
@@ -1756,7 +1824,172 @@ if __name__ == '__main__':
                     os.mkdir('experiment1')
                 perf_df2.to_csv('experiment1/perf_dropout_grouped_results.csv', index = False)
                 #dfi.export(perf_df2,"experiment1/perf_dropout_grouped_results.png")
+
+                with open(save_path  + '/perf_df2.pkl', 'wb') as perf_df2_file:
+                    pickle.dump(perf_df2, perf_df2_file)
     
+    elif args.action == 'experiment1_dropout_uncertainty':
+        predefined_args = [
+        {
+            #-p
+            'path': './data/stocknet-dataset/price/ourpped',
+            #-a
+            'att': 1,
+            #-l
+            'seq': 5,
+            #-u
+            'unit': 4,
+            #-l2
+            'alpha_l2': 1,
+            #-f
+            'fix_init': 0,
+            #-v
+            'adv': 1,
+            #-rl
+            'reload': 1,
+            #-la
+            'beta_adv': 0.01,
+            #-le
+            'epsilon_adv': 0.05,
+            'model_path': './saved_model/acl18_alstm/exp',
+            'model_save_path': './tmp/model',
+            'method': 'Adv-ALSTM',
+            'dataset': 'stocknet'
+        },
+        {
+            #-p
+            'path': './data/kdd17/ourpped/',
+            #-a
+            'att': 1,
+            #-l
+            'seq': 15,
+            #-u
+            'unit': 16,
+            #-l2
+            'alpha_l2': 0.001,
+            #-f
+            'fix_init': 1,
+            #-v
+            'adv': 1,
+            #-rl
+            'reload': 1,
+            #-la
+            'beta_adv': 0.05,
+            #-le
+            'epsilon_adv':  0.001,
+            'model_path': './saved_model/kdd17_alstm/model',
+            'model_save_path': './tmp/model',
+            'method': 'Adv-ALSTM',
+            'dataset': 'kdd17'
+        }]
+        benchmark_df = pd.read_csv('./experiment1/perf_dropout_results.csv')
+        prob_arr = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0]
+        perf_df = None
+
+        # model = benchmark_df[(benchmark_df['dataset'] == 'kdd17') & (benchmark_df['method'] == 'Adv-ALSTM') & (benchmark_df['dropout'] == 0.05) & (benchmark_df['run'] == 5)]
+        # model = model.reset_index()
+        # run_save_path = model['run save path'][0]
+        # with open(run_save_path + '/perf_test_arr.pkl', "rb") as input_file:
+        #     perf_test_arr = pickle.load(input_file)
+        # with open(run_save_path + '/perf_valid_arr.pkl', "rb") as input_file:
+        #     perf_valid_arr = pickle.load(input_file)
+
+        # for i, x in enumerate(perf_test_arr):
+        #     with open(run_save_path.replace('/5', '/' + str(i + 1)) + '/best_test_perf.pkl', 'wb') as perf_df_file:
+        #         pickle.dump(perf_test_arr[i], perf_df_file)
+        # for i, x in enumerate(perf_valid_arr):
+        #     with open(run_save_path.replace('/5', '/' + str(i + 1)) + '/best_valid_perf.pkl', 'wb') as perf_df_file:
+        #         pickle.dump(perf_valid_arr[i], perf_df_file)
+        
+        prob_m = ['std', 'entr']
+        for mi, m in enumerate(prob_m):
+            for index, row in benchmark_df.iterrows():
+                run_save_path = row['run save path']
+                with open(run_save_path + '/best_test_perf.pkl', "rb") as input_file:
+                    best_test_perf = pickle.load(input_file)
+                with open(run_save_path + '/best_valid_perf.pkl', "rb") as input_file:
+                    best_valid_perf = pickle.load(input_file)
+
+                val_pre_prob = best_valid_perf['prob_arr'][mi]
+                tes_pre_prob = best_test_perf['prob_arr'][mi]
+
+                #for i, a in enumerate(best_valid_perf['prob_arr']):
+                for p in prob_arr:
+                    valid_prob_arr = np.copy(best_valid_perf['prob_arr'][mi])
+                    valid_pred_filter = np.copy(best_valid_perf['pred'])
+                    valid_gt_filter = np.copy(best_valid_perf['gt'])
+                    valid_filtered = 0
+                    for i, x in np.ndenumerate(valid_prob_arr):
+                        filt = 1
+                        if x >= p:
+                            filt = 0
+                            valid_filtered = valid_filtered + 1
+                        valid_pred_filter[i] = valid_pred_filter[i] * filt
+                        valid_gt_filter[i] = valid_gt_filter[i] * filt
+
+                    cur_valid_perf = evaluate(valid_pred_filter, valid_gt_filter, best_valid_perf['hinge'], additional_metrics=best_valid_perf['additional_metrics'])
+
+                    test_prob_arr = np.copy(best_test_perf['prob_arr'][mi])
+                    test_pred_filter = np.copy(best_test_perf['pred'])
+                    test_gt_filter = np.copy(best_test_perf['gt'])
+                    test_filtered = 0
+                    for i, x in np.ndenumerate(test_prob_arr):
+                        filt = 1
+                        if x > p:
+                            filt = 0
+                            test_filtered = test_filtered + 1
+                        test_pred_filter[i] = test_pred_filter[i] * filt
+                        test_gt_filter[i] = test_gt_filter[i] * filt
+
+                    cur_test_perf = evaluate(test_pred_filter, test_gt_filter, best_test_perf['hinge'], additional_metrics=best_test_perf['additional_metrics'])
+
+                    val_avg_prob = np.average(val_pre_prob)
+                    tes_avg_prob = np.average(tes_pre_prob)
+
+                    perf_dict = {
+                            'method': [row['method']],
+                            'dataset': [row['dataset']],
+                            'test acc': [cur_test_perf['acc'] * 100],
+                            'test mcc': [cur_test_perf['mcc']],
+                            'test ll': [cur_test_perf['ll']],
+                            'test rs': [cur_test_perf['rs']],
+                            'test ps' : [cur_test_perf['ps']],
+                            'test avg prob': [tes_avg_prob],
+                            'valid acc': [cur_valid_perf['acc'] * 100],
+                            'valid mcc': [cur_valid_perf['mcc']],
+                            'valid ll': [cur_valid_perf['ll']],
+                            'valid rs': [cur_valid_perf['rs']],
+                            'valid ps' : [cur_valid_perf['ps']],
+                            'valid avg prob': [val_avg_prob],
+                            'prob measure': [m],
+                            'dropout' : [row['dropout']],
+                            'run': [row['run']],
+                            'prob confidence threshold': [p],
+                            'iterations': [row['iterations']],
+                            'run save path': [row['run save path']],
+                            'total test predictions': [test_gt_filter.shape[0]],
+                            'filtered test predictions': [test_filtered],
+                            'total valid predictions': [valid_gt_filter.shape[0]],
+                            'filtered valid predictions': [valid_filtered]
+                        }
+
+                    df = pd.DataFrame(perf_dict)
+                    if perf_df is None:
+                        perf_df = df
+                    else:
+                        perf_df = pd.concat([perf_df, df])            
+
+                    if not os.path.exists('experiment1'):
+                        os.mkdir('experiment1')
+                    if not os.path.exists('experiment1/dropout_uncertainty'):
+                        os.mkdir('experiment1/dropout_uncertainty')
+
+                    perf_df.to_csv('experiment1/dropout_uncertainty/perf_dropout_results.csv', index = False)
+                
+                    # with open(model_save_path.replace('/model', '') + '/perf_df.pkl', 'wb') as perf_df_file:
+                    #     pickle.dump(perf_df, perf_df_file)
+                    #dfi.export(perf_df,"experiment1/perf_dropout_results.png")
+               
     elif args.action == 'experiment1_dropout_convergence':
         predefined_args = [
         {
@@ -1949,7 +2182,255 @@ if __name__ == '__main__':
                     #     os.mkdir('experiment1')
                     # perf_df2.to_csv('experiment1/perf_dropout_grouped_results.csv', index = False)
                     # dfi.export(perf_df2,"experiment1/perf_dropout_grouped_results.png")
+    
+    elif args.action == 'experiment1_ensemble':
+        predefined_args = [
+        {
+            #-p
+            'path': './data/stocknet-dataset/price/ourpped',
+            #-a
+            'att': 1,
+            #-l
+            'seq': 5,
+            #-u
+            'unit': 4,
+            #-l2
+            'alpha_l2': 1,
+            #-f
+            'fix_init': 0,
+            #-v
+            'adv': 1,
+            #-rl
+            'reload': 1,
+            #-la
+            'beta_adv': 0.01,
+            #-le
+            'epsilon_adv': 0.05,
+            'model_path': './saved_model/acl18_alstm/exp',
+            'model_save_path': './tmp/model',
+            'method': 'Adv-ALSTM',
+            'dataset': 'stocknet'
+        },
+        {
+            #-p
+            'path': './data/kdd17/ourpped/',
+            #-a
+            'att': 1,
+            #-l
+            'seq': 15,
+            #-u
+            'unit': 16,
+            #-l2
+            'alpha_l2': 0.001,
+            #-f
+            'fix_init': 1,
+            #-v
+            'adv': 1,
+            #-rl
+            'reload': 1,
+            #-la
+            'beta_adv': 0.05,
+            #-le
+            'epsilon_adv':  0.001,
+            'model_path': './saved_model/kdd17_alstm/model',
+            'model_save_path': './tmp/model',
+            'method': 'Adv-ALSTM',
+            'dataset': 'kdd17'
+        }]
 
+        perf_df = None
+        perf_df2 = None
+        perf_df3 = None
+        for pre in predefined_args:
+            args.path = pre['path']
+            args.att = pre['att']
+            args.seq = pre['seq']
+            args.unit = pre['unit']
+            args.alpha_l2 = pre['alpha_l2']
+            args.fix_init = pre['fix_init']
+            args.adv = pre['adv']
+            args.reload = pre['reload']
+            args.beta_adv = pre['beta_adv']
+            args.epsilon_adv = pre['epsilon_adv']
+            args.model_path = pre['model_path']
+            method = pre['method']
+            dataset = pre['dataset']
+
+            if dataset == 'stocknet':
+                tra_date = '2014-01-02'
+                val_date = '2015-08-03'
+                tes_date = '2015-10-01'
+            elif dataset == 'kdd17':
+                tra_date = '2007-01-03'
+                val_date = '2015-01-02'
+                tes_date = '2016-01-04'
+            else:
+                print('unexpected path: %s' % args.path)
+                exit(0)
+
+            
+            ensemble_parameters = [
+                {
+                    "param_iterations": 5,
+                    "seq": 20
+                },
+                {
+                    "param_iterations": 4,
+                    "seq": 20
+                },
+                {
+                    "param_iterations": 3,
+                    "seq": 20
+                } 
+            ]
+
+            for e in ensemble_parameters:
+                runs = 5
+                runs_arr = [*range(runs + 1)][1:]    
+                perf_valid_arr = []
+                perf_test_arr = []
+                ensemble_model_results = []
+                param_iterations = e['param_iterations']
+                parameters = {
+                    'seq': int(args.seq),
+                    'unit': int(args.unit),
+                    'alp': float(args.alpha_l2),
+                    'bet': float(args.beta_adv),
+                    'eps': float(args.epsilon_adv),
+                    'lr': float(args.learning_rate),
+                    'meth': method,
+                    'data': dataset,
+                    'act': args.action,
+                    'seq': int(e['seq'])
+                }
+            
+                pure_LSTM = AWLSTM(
+                        data_path=args.path,
+                        model_path=args.model_path,
+                        model_save_path=args.model_save_path,
+                        parameters=parameters,
+                        steps=args.step,
+                        epochs=args.epoch, batch_size=args.batch_size, gpu=args.gpu,
+                        tra_date=tra_date, val_date=val_date, tes_date=tes_date, att=args.att,
+                        hinge=args.hinge_lose, fix_init=args.fix_init, adv=args.adv,
+                        reload=args.reload,
+                        dropout_activation_function = None
+                )
+                for r in runs_arr:
+
+                    ensemble_model_results, best_valid_perf, best_test_perf = pure_LSTM.train_ensemble(return_perf=True, return_pred=False, param_iterations=param_iterations)
+                    perf_valid_arr.append(best_valid_perf)
+                    perf_test_arr.append(best_test_perf)
+                
+                    perf_dict = {
+                            'method': [method],
+                            'dataset': [dataset],
+                            'test acc': [best_test_perf['acc'] * 100],
+                            'test mcc': [best_test_perf['mcc']],
+                            'test ll': [best_test_perf['ll']],
+                            'valid acc': [best_valid_perf['acc'] * 100],
+                            'valid mcc': [best_valid_perf['mcc']],
+                            'valid ll': [best_valid_perf['ll']],
+                            'ensemble models': [ensemble_model_results.size],
+                            'param iterations': [param_iterations],
+                            'run': [r]
+                        }
+
+                    df = pd.DataFrame(perf_dict)
+                    if perf_df is None:
+                        perf_df = df
+                    else:
+                        perf_df = pd.concat([perf_df, df])            
+
+                    if not os.path.exists('experiment1'):
+                        os.mkdir('experiment1')
+                    perf_df.to_csv('experiment1/perf_ensemble_results.csv', index = False)
+                    dfi.export(perf_df,"experiment1/perf_ensemble_results.png")
+
+                valid_acc_list = list(map(lambda x: x['acc'], perf_valid_arr))
+                valid_mcc_list = list(map(lambda x: x['mcc'], perf_valid_arr))
+                valid_ll_list = list(map(lambda x: x['ll'], perf_valid_arr))
+
+                avg_valid_acc = np.average(np.array(valid_acc_list)) * 100
+                avg_valid_mcc = np.average(np.array(valid_mcc_list))
+                avg_valid_ll = np.average(np.array(valid_ll_list))
+                std_valid_ll = np.std(np.array(valid_ll_list), ddof=1) / np.sqrt(np.size(np.array(valid_ll_list)))
+
+                test_acc_list = list(map(lambda x: x['acc'], perf_test_arr))
+                test_mcc_list = list(map(lambda x: x['mcc'], perf_test_arr))
+                test_ll_list = list(map(lambda x: x['ll'], perf_test_arr))
+
+                avg_test_acc = np.average(np.array(test_acc_list)) * 100
+                avg_test_mcc = np.average(np.array(test_mcc_list))
+                avg_test_ll = np.average(np.array(test_ll_list))
+                std_test_ll= np.std(np.array(test_ll_list), ddof=1) / np.sqrt(np.size(np.array(test_ll_list)))
+                avg_acc = np.average(np.array([avg_test_acc, avg_valid_acc]))
+                avg_mcc = np.average(np.array([avg_test_mcc, avg_valid_mcc]))
+                avg_std_err_ll = np.average(np.array([std_test_ll, std_valid_ll]))
+
+                perf_dict_2 = {
+                            'method': [method],
+                            'dataset': [dataset],
+                            'param iterations': [param_iterations],
+                            'avg test acc': [avg_test_acc],
+                            'avg test mcc': [avg_test_mcc],
+                            'avg test ll': [avg_test_ll],
+                            'std error test ll': [std_test_ll],
+                            'avg valid acc': [avg_valid_acc],
+                            'avg valid mcc': [avg_valid_mcc],
+                            'avg valid ll': [avg_valid_ll],
+                            'std error valid ll': [std_valid_ll],
+                            'avg acc': [avg_acc],
+                            'avg mcc': [avg_mcc],
+                            'avg std error ll': [avg_std_err_ll]
+                        }
+                df_2 = pd.DataFrame(perf_dict_2)
+
+                if perf_df2 is None:
+                    perf_df2 = df_2
+                else:
+                    perf_df2 = pd.concat([perf_df2, df_2])         
+
+                if not os.path.exists('experiment1'):
+                    os.mkdir('experiment1')
+                perf_df2.to_csv('experiment1/perf_ensemble_grouped_results.csv', index = False)
+                dfi.export(perf_df2,"experiment1/perf_ensemble_grouped_results.png")
+
+                feat_dim_arr = []
+                seq_arr = []
+                param_iterations_arr = []
+
+                for e in ensemble_model_results:
+                    feat_dim_arr.append(e['feat_dim'])
+                    seq_arr.append(e['seq'])
+
+                method_arr = []
+                dataset_arr = []
+                for l in range(len(seq_arr)):
+                    method_arr.append(method)
+                    dataset_arr.append(dataset)
+                    param_iterations_arr.append(param_iterations)
+
+                perf_dict_3 = {
+                            'method': method_arr,
+                            'dataset': dataset_arr,
+                            'param iterations': param_iterations_arr,
+                            'seq': seq_arr,
+                            'feat_dim': feat_dim_arr
+                        }
+                df_3 = pd.DataFrame(perf_dict_3)
+                
+                if perf_df3 is None:
+                    perf_df3 = df_3
+                else:
+                    perf_df3 = pd.concat([perf_df3, df_3])            
+
+
+                if not os.path.exists('experiment1'):
+                    os.mkdir('experiment1')
+                df_3.to_csv('experiment1/perf_ensemble_parameters_used.csv', index = False)
+                dfi.export(df_3,"experiment1/perf_ensemble_parameters_used.png")
+ 
     elif args.action == 'experiment2_ensemble':
         predefined_args = [  
         {
@@ -3059,254 +3540,6 @@ if __name__ == '__main__':
             perf_df4.to_csv('experiment2/replication_tes_mapping_results.csv', index = False)
             #dfi.export(perf_df4,"experiment2/replication_tes_mapping_results.png")
 
-    elif args.action == 'experiment1_ensemble':
-        predefined_args = [
-    {
-        #-p
-        'path': './data/stocknet-dataset/price/ourpped',
-        #-a
-        'att': 1,
-        #-l
-        'seq': 5,
-        #-u
-        'unit': 4,
-        #-l2
-        'alpha_l2': 1,
-        #-f
-        'fix_init': 0,
-        #-v
-        'adv': 1,
-        #-rl
-        'reload': 1,
-        #-la
-        'beta_adv': 0.01,
-        #-le
-        'epsilon_adv': 0.05,
-        'model_path': './saved_model/acl18_alstm/exp',
-        'model_save_path': './tmp/model',
-        'method': 'Adv-ALSTM',
-        'dataset': 'stocknet'
-    },
-    {
-        #-p
-        'path': './data/kdd17/ourpped/',
-        #-a
-        'att': 1,
-        #-l
-        'seq': 15,
-        #-u
-        'unit': 16,
-        #-l2
-        'alpha_l2': 0.001,
-        #-f
-        'fix_init': 1,
-        #-v
-        'adv': 1,
-        #-rl
-        'reload': 1,
-        #-la
-        'beta_adv': 0.05,
-        #-le
-        'epsilon_adv':  0.001,
-        'model_path': './saved_model/kdd17_alstm/model',
-        'model_save_path': './tmp/model',
-        'method': 'Adv-ALSTM',
-        'dataset': 'kdd17'
-    }]
-
-        perf_df = None
-        perf_df2 = None
-        perf_df3 = None
-        for pre in predefined_args:
-            args.path = pre['path']
-            args.att = pre['att']
-            args.seq = pre['seq']
-            args.unit = pre['unit']
-            args.alpha_l2 = pre['alpha_l2']
-            args.fix_init = pre['fix_init']
-            args.adv = pre['adv']
-            args.reload = pre['reload']
-            args.beta_adv = pre['beta_adv']
-            args.epsilon_adv = pre['epsilon_adv']
-            args.model_path = pre['model_path']
-            method = pre['method']
-            dataset = pre['dataset']
-
-            if dataset == 'stocknet':
-                tra_date = '2014-01-02'
-                val_date = '2015-08-03'
-                tes_date = '2015-10-01'
-            elif dataset == 'kdd17':
-                tra_date = '2007-01-03'
-                val_date = '2015-01-02'
-                tes_date = '2016-01-04'
-            else:
-                print('unexpected path: %s' % args.path)
-                exit(0)
-
-            
-            ensemble_parameters = [
-                {
-                    "param_iterations": 5,
-                    "seq": 20
-                },
-                {
-                    "param_iterations": 4,
-                    "seq": 20
-                },
-                {
-                    "param_iterations": 3,
-                    "seq": 20
-                } 
-            ]
-
-            for e in ensemble_parameters:
-                runs = 5
-                runs_arr = [*range(runs + 1)][1:]    
-                perf_valid_arr = []
-                perf_test_arr = []
-                ensemble_model_results = []
-                param_iterations = e['param_iterations']
-                parameters = {
-                    'seq': int(args.seq),
-                    'unit': int(args.unit),
-                    'alp': float(args.alpha_l2),
-                    'bet': float(args.beta_adv),
-                    'eps': float(args.epsilon_adv),
-                    'lr': float(args.learning_rate),
-                    'meth': method,
-                    'data': dataset,
-                    'act': args.action,
-                    'seq': int(e['seq'])
-                }
-            
-                pure_LSTM = AWLSTM(
-                        data_path=args.path,
-                        model_path=args.model_path,
-                        model_save_path=args.model_save_path,
-                        parameters=parameters,
-                        steps=args.step,
-                        epochs=args.epoch, batch_size=args.batch_size, gpu=args.gpu,
-                        tra_date=tra_date, val_date=val_date, tes_date=tes_date, att=args.att,
-                        hinge=args.hinge_lose, fix_init=args.fix_init, adv=args.adv,
-                        reload=args.reload,
-                        dropout_activation_function = None
-                )
-                for r in runs_arr:
-
-                    ensemble_model_results, best_valid_perf, best_test_perf = pure_LSTM.train_ensemble(return_perf=True, return_pred=False, param_iterations=param_iterations)
-                    perf_valid_arr.append(best_valid_perf)
-                    perf_test_arr.append(best_test_perf)
-                
-                    perf_dict = {
-                            'method': [method],
-                            'dataset': [dataset],
-                            'test acc': [best_test_perf['acc'] * 100],
-                            'test mcc': [best_test_perf['mcc']],
-                            'test ll': [best_test_perf['ll']],
-                            'valid acc': [best_valid_perf['acc'] * 100],
-                            'valid mcc': [best_valid_perf['mcc']],
-                            'valid ll': [best_valid_perf['ll']],
-                            'ensemble models': [ensemble_model_results.size],
-                            'param iterations': [param_iterations],
-                            'run': [r]
-                        }
-
-                    df = pd.DataFrame(perf_dict)
-                    if perf_df is None:
-                        perf_df = df
-                    else:
-                        perf_df = pd.concat([perf_df, df])            
-
-                    if not os.path.exists('experiment1'):
-                        os.mkdir('experiment1')
-                    perf_df.to_csv('experiment1/perf_ensemble_results.csv', index = False)
-                    dfi.export(perf_df,"experiment1/perf_ensemble_results.png")
-
-                valid_acc_list = list(map(lambda x: x['acc'], perf_valid_arr))
-                valid_mcc_list = list(map(lambda x: x['mcc'], perf_valid_arr))
-                valid_ll_list = list(map(lambda x: x['ll'], perf_valid_arr))
-
-                avg_valid_acc = np.average(np.array(valid_acc_list)) * 100
-                avg_valid_mcc = np.average(np.array(valid_mcc_list))
-                avg_valid_ll = np.average(np.array(valid_ll_list))
-                std_valid_ll = np.std(np.array(valid_ll_list), ddof=1) / np.sqrt(np.size(np.array(valid_ll_list)))
-
-                test_acc_list = list(map(lambda x: x['acc'], perf_test_arr))
-                test_mcc_list = list(map(lambda x: x['mcc'], perf_test_arr))
-                test_ll_list = list(map(lambda x: x['ll'], perf_test_arr))
-
-                avg_test_acc = np.average(np.array(test_acc_list)) * 100
-                avg_test_mcc = np.average(np.array(test_mcc_list))
-                avg_test_ll = np.average(np.array(test_ll_list))
-                std_test_ll= np.std(np.array(test_ll_list), ddof=1) / np.sqrt(np.size(np.array(test_ll_list)))
-                avg_acc = np.average(np.array([avg_test_acc, avg_valid_acc]))
-                avg_mcc = np.average(np.array([avg_test_mcc, avg_valid_mcc]))
-                avg_std_err_ll = np.average(np.array([std_test_ll, std_valid_ll]))
-
-                perf_dict_2 = {
-                            'method': [method],
-                            'dataset': [dataset],
-                            'param iterations': [param_iterations],
-                            'avg test acc': [avg_test_acc],
-                            'avg test mcc': [avg_test_mcc],
-                            'avg test ll': [avg_test_ll],
-                            'std error test ll': [std_test_ll],
-                            'avg valid acc': [avg_valid_acc],
-                            'avg valid mcc': [avg_valid_mcc],
-                            'avg valid ll': [avg_valid_ll],
-                            'std error valid ll': [std_valid_ll],
-                            'avg acc': [avg_acc],
-                            'avg mcc': [avg_mcc],
-                            'avg std error ll': [avg_std_err_ll]
-                        }
-                df_2 = pd.DataFrame(perf_dict_2)
-
-                if perf_df2 is None:
-                    perf_df2 = df_2
-                else:
-                    perf_df2 = pd.concat([perf_df2, df_2])         
-
-                if not os.path.exists('experiment1'):
-                    os.mkdir('experiment1')
-                perf_df2.to_csv('experiment1/perf_ensemble_grouped_results.csv', index = False)
-                dfi.export(perf_df2,"experiment1/perf_ensemble_grouped_results.png")
-
-                feat_dim_arr = []
-                seq_arr = []
-                param_iterations_arr = []
-
-                for e in ensemble_model_results:
-                    feat_dim_arr.append(e['feat_dim'])
-                    seq_arr.append(e['seq'])
-
-                method_arr = []
-                dataset_arr = []
-                for l in range(len(seq_arr)):
-                    method_arr.append(method)
-                    dataset_arr.append(dataset)
-                    param_iterations_arr.append(param_iterations)
-
-                perf_dict_3 = {
-                            'method': method_arr,
-                            'dataset': dataset_arr,
-                            'param iterations': param_iterations_arr,
-                            'seq': seq_arr,
-                            'feat_dim': feat_dim_arr
-                        }
-                df_3 = pd.DataFrame(perf_dict_3)
-                
-                if perf_df3 is None:
-                    perf_df3 = df_3
-                else:
-                    perf_df3 = pd.concat([perf_df3, df_3])            
-
-
-                if not os.path.exists('experiment1'):
-                    os.mkdir('experiment1')
-                df_3.to_csv('experiment1/perf_ensemble_parameters_used.csv', index = False)
-                dfi.export(df_3,"experiment1/perf_ensemble_parameters_used.png")
- 
     elif args.action == 'experiment2_dropout':
         predefined_args = [
         {
