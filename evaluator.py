@@ -17,9 +17,15 @@ def evaluate(prediction, ground_truth, hinge=False, reg=False, additional_metric
         exit(0)
     performance['mcc'] = matthews_corrcoef(ground_truth, pred)
     performance['pred'] = pred
+    performance['gt'] = ground_truth
+    performance['hinge'] = hinge
+    performance['additional_metrics'] = additional_metrics
+
     if additional_metrics == True:
-        performance['ll'] = log_loss(ground_truth, prediction, eps = 1e-7)
-    
+        performance['ll'] = log_loss(ground_truth, prediction, eps = 1e-7, labels = [0,1])
+        performance['rs'] = recall_score(ground_truth, pred, labels = [0,1])
+        performance['ps'] = precision_score(ground_truth, pred, labels = [0,1])
+
     return performance
 
 def label(hinge, prediction):
