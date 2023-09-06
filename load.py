@@ -108,36 +108,52 @@ def load_cla_data(data_path, tra_date, val_date, tes_date, seq=2,
     val_pv = np.zeros([val_num, seq, fea_dim], dtype=float)
     val_wd = np.zeros([val_num, seq, 5], dtype=float)
     val_gt = np.zeros([val_num, 1], dtype=float)
+    val_ins_ind = []
     ins_ind = 0
     for date_ind in range(val_ind, tes_ind):
         # filter out instances without length enough history
         if date_ind < seq:
             continue
         for tic_ind in range(len(fnames)):
+            if len(val_ins_ind) < tic_ind + 1:
+                val_ins_ind.append([])
             if abs(data_EOD[tic_ind][date_ind][-2]) > 1e-8 and \
                             data_EOD[tic_ind][date_ind - seq: date_ind, :].min() > -123320:
                 val_pv[ins_ind] = data_EOD[tic_ind][date_ind - seq: date_ind, :-(default_fea_dim - fea_dim + 2)]
                 val_wd[ins_ind] = data_wd[date_ind - seq: date_ind, :]
                 val_gt[ins_ind, 0] = (data_EOD[tic_ind][date_ind][-2] + 1) / 2
                 if return_mappings == True:
-                    prev_date = max((x['date'] for x in list(filter(lambda x: x['ticker_filename'] == fnames[tic_ind], val_mappings))), default=None)
+                    #prev_date = max((x['date'] for x in list(filter(lambda x: x['ticker_filename'] == fnames[tic_ind], val_mappings))), default=None)
+
+                    length = len(val_ins_ind[tic_ind])
+                    val_n_adj_close = data_EOD[tic_ind][date_ind][4]
+                    val_adj_close = data_EOD[tic_ind][date_ind][-1]
+
                     val_mappings.append({
+                        'ins_ind': ins_ind,
                         'ticker_filename': fnames[tic_ind],
                         'date': trading_dates[date_ind],
-                        'prev_date': prev_date
+                        'n_adj_close': val_n_adj_close,
+                        'gt': val_gt[ins_ind, 0],
+                        'adj_close': val_adj_close,
+                        'prev_ins_ind': None if length == 0 else val_ins_ind[tic_ind][length - 1]
                     })
+                    val_ins_ind[tic_ind].append(ins_ind)
                 ins_ind += 1
 
     # testing
     tes_pv = np.zeros([tes_num, seq, fea_dim], dtype=float)
     tes_wd = np.zeros([tes_num, seq, 5], dtype=float)
     tes_gt = np.zeros([tes_num, 1], dtype=float)
+    tes_ins_ind = []
     ins_ind = 0
     for date_ind in range(tes_ind, len(trading_dates)):
         # filter out instances without length enough history
         if date_ind < seq:
             continue
-        for tic_ind in range(len(fnames)):
+        for tic_ind in range(len(fnames)):                          
+            if len(tes_ins_ind) < tic_ind + 1:
+                tes_ins_ind.append([])
             if abs(data_EOD[tic_ind][date_ind][-2]) > 1e-8 and \
                             data_EOD[tic_ind][date_ind - seq: date_ind, :].min() > -123320:
                 tes_pv[ins_ind] = data_EOD[tic_ind][date_ind - seq: date_ind, :-(default_fea_dim - fea_dim + 2)]
@@ -146,95 +162,31 @@ def load_cla_data(data_path, tra_date, val_date, tes_date, seq=2,
                 tes_wd[ins_ind] = data_wd[date_ind - seq: date_ind, :]
                 tes_gt[ins_ind, 0] = (data_EOD[tic_ind][date_ind][-2] + 1) / 2
                 if return_mappings == True:
-                    prev_date = max((x['date'] for x in list(filter(lambda x: x['ticker_filename'] == fnames[tic_ind], tes_mappings))), default=None)
+                    #prev_date = max((x['date'] for x in list(filter(lambda x: x['ticker_filename'] == fnames[tic_ind], tes_mappings))), default=None)
+
+                    length = len(tes_ins_ind[tic_ind])
+                    tes_n_adj_close = data_EOD[tic_ind][date_ind][4]
+                    tes_adj_close = data_EOD[tic_ind][date_ind][-1]
+                    if fnames[tic_ind] == 'AAPL.csv':
+                        d = 0
+                    # if (tes_n_adj_close > 0 and tes_log_return < 0) or (tes_n_adj_close < 0 and tes_log_return > 0):
+                    #     tes_log_return = -tes_log_return
+
                     tes_mappings.append({
+                        'ins_ind': ins_ind,
                         'ticker_filename': fnames[tic_ind],
                         'date': trading_dates[date_ind],
-                        'prev_date': prev_date
+                        'n_adj_close': tes_n_adj_close,
+                        'gt': tes_gt[ins_ind, 0],
+                        'adj_close': tes_adj_close,
+                        'prev_ins_ind': None if length == 0 else tes_ins_ind[tic_ind][length - 1]
                     })
+                    tes_ins_ind[tic_ind].append(ins_ind)
                 ins_ind += 1
 
     if return_mappings == False:
         return tra_pv, tra_wd, tra_gt, val_pv, val_wd, val_gt, tes_pv, tes_wd, tes_gt
     else:
-        loaded_files = {}    
-
-        for i, m in enumerate(val_mappings):
-            if m['ticker_filename'] not in loaded_files:
-                path = data_path
-                if 'kdd17' in data_path:
-                    path = data_path.replace('ourpped', 'price_long_50')
-                elif 'stocknet' in data_path:
-                    path = data_path.replace('ourpped', 'raw')
-
-                loaded_files[m['ticker_filename']] = pd.read_csv(
-                os.path.join(path, m['ticker_filename']), delimiter=',',
-                header=0
-                ).sort_values(by = 'Date')
-
-            date = m['date']
-            date_obj = datetime.strptime(m['date'], '%Y-%m-%d')
-            date_format = date_obj.strftime("X%m/X%d/%Y").replace('X0','X').replace('X','')
-            row = loaded_files[m['ticker_filename']].loc[(loaded_files[m['ticker_filename']]['Date']==date) | (loaded_files[m['ticker_filename']]['Date']==date_format)]
-            prev_row = list(filter(lambda x: x['date'] == m['prev_date'] and x['ticker_filename'] == m['ticker_filename'], val_mappings))
-
-            m['prev_adj_close'] = None
-            m['log_return'] = None
-
-            if 'kdd17' in data_path:
-                m['adj_close'] = row.values[0][6]
-                if len(prev_row) > 0 :
-                    m['prev_adj_close'] = prev_row[0]['adj_close']
-                    m['log_return'] = np.log(row.values[0][6] / prev_row[0]['adj_close'])
-            else:
-                m['adj_close'] = row.values[0][5]
-                if len(prev_row) > 0 :
-                    m['prev_adj_close'] = prev_row[0]['adj_close']
-                    m['log_return'] = np.log(row.values[0][5] / prev_row[0]['adj_close'])
-
-            # if val_gt[i][0] == 0:
-            #     m['profit'] = -m['daily_return']
-            # elif val_gt[i][0] == 1:
-            #     m['profit'] = m['daily_return']
-            
-        for i, m in enumerate(tes_mappings):
-            if m['ticker_filename'] not in loaded_files:
-                path = data_path
-                if 'kdd17' in data_path:
-                    path = data_path.replace('ourpped', 'price_long_50')
-                elif 'stocknet' in data_path:
-                    path = data_path.replace('ourpped', 'raw')
-
-                loaded_files[m['ticker_filename']] = pd.read_csv(
-                os.path.join(path, m['ticker_filename']), delimiter=',',
-                header=0
-                ).sort_values(by = 'Date')
-            
-            date = m['date']
-            date_obj = datetime.strptime(m['date'], '%Y-%m-%d')
-            date_format = date_obj.strftime("X%m/X%d/%Y").replace('X0','X').replace('X','')
-            row = loaded_files[m['ticker_filename']].loc[(loaded_files[m['ticker_filename']]['Date']==date) | (loaded_files[m['ticker_filename']]['Date']==date_format)]
-            prev_row = list(filter(lambda x: x['date'] == m['prev_date'] and x['ticker_filename'] == m['ticker_filename'], tes_mappings))
-
-            m['prev_adj_close'] = None
-            m['log_return'] = None
-
-            if 'kdd17' in data_path:
-                m['adj_close'] = row.values[0][6]
-                if len(prev_row) > 0: 
-                    m['prev_adj_close'] = prev_row[0]['adj_close']
-                    m['log_return'] = np.log(row.values[0][6] / prev_row[0]['adj_close'])
-            else:
-                m['adj_close'] = row.values[0][5]
-                if len(prev_row) > 0: 
-                    m['prev_adj_close'] = prev_row[0]['adj_close']
-                    m['log_return'] = np.log(row.values[0][5] / prev_row[0]['adj_close'])
-
-            # if tes_gt[i][0] == 0:
-            #     m['profit'] = -m['daily_return']
-            # elif tes_gt[i][0] == 1:
-            #     m['profit'] = m['daily_return']
-
         return tra_pv, tra_wd, tra_gt, val_pv, val_wd, val_gt, tes_pv, tes_wd, tes_gt, val_mappings, tes_mappings
 
 if __name__ == '__main__':

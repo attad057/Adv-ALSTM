@@ -404,6 +404,7 @@ class AWLSTM:
         pre_arr_s = np.reshape(np.transpose(pre_np_arr), (pre_np_arr.shape[1], pre_np_arr.shape[0]))
         pre_avg = np.mean(pre_arr_s, axis = 1)
         pre_std = np.std(pre_arr_s, axis = 1)
+        pre_var = np.var(pre_arr_s, axis = 1)
         pre_entr = np.zeros((pre_std.shape[0]))
 
         for i, x in enumerate(pre_arr_s):
@@ -415,8 +416,7 @@ class AWLSTM:
         #take best indexes from pre_np_arr
         # ind_rows = np.arange(pre_np_arr.shape[1])
         # pre = np.reshape(pre_arr_s[ind_rows, ind_columns], (pre_np_arr.shape[1], pre_np_arr.shape[2]))
-        return np.reshape(pre_avg, (pre_np_arr.shape[1], pre_np_arr.shape[2])), [pre_std, pre_entr]
-
+        return np.reshape(pre_avg, (pre_np_arr.shape[1], pre_np_arr.shape[2])), [{'measure': 'std', 'val': pre_std},{'measure': 'var', 'val': pre_var},{'measure': 'entr', 'val': pre_entr}]
 
     def predict_adv(self):
         self.construct_graph()
@@ -1262,7 +1262,7 @@ if __name__ == '__main__':
                     help='Apply dropout to each layer')
     args = parser.parse_args()
 
-    args.action = 'experiment1_dropout_uncertainty'
+    args.action = 'replication'
     #args.dropout_wrapper = 1
     dataset = 'stocknet' if 'stocknet' in args.path else 'kdd17' if 'kdd17' in args.path else ''
     method = ''
@@ -1705,15 +1705,19 @@ if __name__ == '__main__':
                     best_valid_perf, best_test_perf = pure_LSTM.train_monte_carlo_dropout(return_perf=True, return_pred=False, iterations=dropout_iterations)
 
                     perf_valid_arr.append(best_valid_perf)
-                    perf_test_arr.append(best_test_perf)    
-                    val_pre_std = best_valid_perf['prob_arr'][0]
-                    val_pre_entr = best_valid_perf['prob_arr'][1]
-                    tes_pre_std = best_test_perf['prob_arr'][0]
-                    tes_pre_entr = best_test_perf['prob_arr'][1]
+                    perf_test_arr.append(best_test_perf)  
+                    val_pre_std = list(filter(lambda x: x['measure'] == 'std', best_valid_perf['prob_arr']))[0]['val']  
+                    val_pre_var =  list(filter(lambda x: x['measure'] == 'var', best_valid_perf['prob_arr']))[0]['val']  
+                    val_pre_entr = list(filter(lambda x: x['measure'] == 'entr', best_valid_perf['prob_arr']))[0]['val']  
+                    tes_pre_std = list(filter(lambda x: x['measure'] == 'std', best_test_perf['prob_arr']))[0]['val']  
+                    tes_pre_var = list(filter(lambda x: x['measure'] == 'var', best_test_perf['prob_arr']))[0]['val']  
+                    tes_pre_entr = list(filter(lambda x: x['measure'] == 'entr', best_test_perf['prob_arr']))[0]['val']  
                  
                     val_avg_std = np.average(val_pre_std)
+                    val_avg_var = np.average(val_pre_var)
                     val_avg_entr = np.average(val_pre_entr)
                     tes_avg_std = np.average(tes_pre_std)
+                    tes_avg_var = np.average(tes_pre_var)
                     tes_avg_entr = np.average(tes_pre_entr)
 
                     perf_dict = {
@@ -1725,6 +1729,7 @@ if __name__ == '__main__':
                             'test rs': [best_test_perf['rs']],
                             'test ps' : [best_test_perf['ps']],
                             'test avg std': [tes_avg_std],
+                            'test avg var': [tes_avg_var],
                             'test avg entr': [tes_avg_entr],
                             'valid acc': [best_valid_perf['acc'] * 100],
                             'valid mcc': [best_valid_perf['mcc']],
@@ -1732,6 +1737,7 @@ if __name__ == '__main__':
                             'valid rs': [best_valid_perf['rs']],
                             'valid ps' : [best_valid_perf['ps']],
                             'valid avg std': [val_avg_std],
+                            'valid avg var': [val_avg_var],
                             'valid avg entr': [val_avg_entr],
                             'dropout' : [args.state_keep_prob],
                             'run': [r],
@@ -1747,7 +1753,9 @@ if __name__ == '__main__':
 
                     if not os.path.exists('experiment1'):
                         os.mkdir('experiment1')
-                    perf_df.to_csv('experiment1/perf_dropout_results.csv', index = False)
+                    if not os.path.exists('experiment1/dropout'):
+                        os.mkdir('experiment1/dropout')
+                    perf_df.to_csv('experiment1/dropout/perf_dropout_results.csv', index = False)
                     
                     with open(run_save_path + '/perf_df.pkl', 'wb') as perf_df_file:
                         pickle.dump(perf_df, perf_df_file)
@@ -1764,18 +1772,31 @@ if __name__ == '__main__':
                 valid_rs_list = list(map(lambda x: x['rs'], perf_valid_arr))
                 valid_ps_list = list(map(lambda x: x['ps'], perf_valid_arr))
 
+                valid_prob_arr_select_many = [item for row in list(map(lambda x: x['prob_arr'], perf_valid_arr)) for item in row]
+                valid_pre_std_list = list(map(lambda x: x['val'], list(filter(lambda x: x['measure'] == 'std', valid_prob_arr_select_many))))
+                valid_pre_var_list = list(map(lambda x: x['val'], list(filter(lambda x: x['measure'] == 'var', valid_prob_arr_select_many))))
+                valid_pre_ent_list = list(map(lambda x: x['val'], list(filter(lambda x: x['measure'] == 'entr', valid_prob_arr_select_many))))
+
                 avg_valid_acc = np.average(np.array(valid_acc_list)) * 100
                 avg_valid_mcc = np.average(np.array(valid_mcc_list))
                 avg_valid_ll = np.average(np.array(valid_ll_list))
                 std_valid_ll = np.std(np.array(valid_ll_list), ddof=1) / np.sqrt(np.size(np.array(valid_ll_list)))
                 avg_valid_rs = np.average(np.array(valid_rs_list))
                 avg_valid_ps = np.average(np.array(valid_ps_list))
+                avg_valid_std = np.average(np.array(valid_pre_std_list))
+                avg_valid_var = np.average(np.array(valid_pre_var_list))
+                avg_valid_ent = np.average(np.array(valid_pre_ent_list))
 
                 test_acc_list = list(map(lambda x: x['acc'], perf_test_arr))
                 test_mcc_list = list(map(lambda x: x['mcc'], perf_test_arr))
                 test_ll_list = list(map(lambda x: x['ll'], perf_test_arr))
                 test_rs_list = list(map(lambda x: x['rs'], perf_test_arr))
                 test_ps_list = list(map(lambda x: x['ps'], perf_test_arr))
+                test_prob_arr_select_many = [item for row in list(map(lambda x: x['prob_arr'], perf_test_arr)) for item in row]
+                test_pre_std_list = list(map(lambda x: x['val'], list(filter(lambda x: x['measure'] == 'std', test_prob_arr_select_many))))
+                test_pre_var_list = list(map(lambda x: x['val'], list(filter(lambda x: x['measure'] == 'var', test_prob_arr_select_many))))
+                test_pre_ent_list = list(map(lambda x: x['val'], list(filter(lambda x: x['measure'] == 'entr', test_prob_arr_select_many))))
+
 
                 avg_test_acc = np.average(np.array(test_acc_list)) * 100
                 avg_test_mcc = np.average(np.array(test_mcc_list))
@@ -1783,12 +1804,18 @@ if __name__ == '__main__':
                 std_test_ll = np.std(np.array(test_ll_list), ddof=1) / np.sqrt(np.size(np.array(test_ll_list)))
                 avg_test_rs = np.average(np.array(test_rs_list))
                 avg_test_ps = np.average(np.array(test_ps_list))
+                avg_test_std = np.average(np.array(test_pre_std_list))
+                avg_test_var = np.average(np.array(test_pre_var_list))
+                avg_test_ent = np.average(np.array(test_pre_ent_list))
 
                 avg_acc = np.average(np.array([avg_test_acc, avg_valid_acc]))
                 avg_mcc = np.average(np.array([avg_test_mcc, avg_valid_mcc]))
                 avg_std_err_ll = np.average(np.array([std_test_ll, std_valid_ll]))
                 avg_rs = np.average(np.array([avg_test_rs, avg_valid_rs]))
                 avg_ps = np.average(np.array([avg_test_ps, avg_valid_ps]))
+                avg_std = np.average(np.array([avg_test_std, avg_valid_std]))
+                avg_var = np.average(np.array([avg_test_var, avg_valid_var]))
+                avg_ent = np.average(np.array([avg_test_ent, avg_valid_ent]))
 
                 perf_dict_2 = {
                             'method': [method],
@@ -1800,17 +1827,26 @@ if __name__ == '__main__':
                             'std error test ll': [std_test_ll],
                             'avg test rs' : [avg_test_rs],
                             'avg test ps' : [avg_test_ps],
+                            'avg test std' : [avg_test_std],
+                            'avg test var' : [avg_test_var],
+                            'avg test ent' : [avg_test_ent],
                             'avg valid acc': [avg_valid_acc],
                             'avg valid mcc': [avg_valid_mcc],
                             'avg valid ll': [avg_valid_ll],
                             'std error valid ll': [std_valid_ll],
                             'avg valid rs' : [avg_valid_rs],
                             'avg valid ps' : [avg_valid_ps],
+                            'avg valid std' : [avg_valid_std],
+                            'avg valid var' : [avg_valid_var],
+                            'avg valid ent' : [avg_valid_ent],
                             'avg acc': [avg_acc],
                             'avg mcc': [avg_mcc],
                             'avg std error ll': [avg_std_err_ll],
                             'avg rs' : [avg_rs],
-                            'avg ps' : [avg_ps]
+                            'avg ps' : [avg_ps],
+                            'avg std' : [avg_std],
+                            'avg var' : [avg_var],                          
+                            'avg ent' : [avg_ent]
                         }
 
                 df_2 = pd.DataFrame(perf_dict_2)
@@ -1822,67 +1858,16 @@ if __name__ == '__main__':
 
                 if not os.path.exists('experiment1'):
                     os.mkdir('experiment1')
-                perf_df2.to_csv('experiment1/perf_dropout_grouped_results.csv', index = False)
+                if not os.path.exists('experiment1/dropout'):
+                    os.mkdir('experiment1/dropout')
+                perf_df2.to_csv('experiment1/dropout/perf_dropout_grouped_results.csv', index = False)
                 #dfi.export(perf_df2,"experiment1/perf_dropout_grouped_results.png")
 
                 with open(save_path  + '/perf_df2.pkl', 'wb') as perf_df2_file:
                     pickle.dump(perf_df2, perf_df2_file)
     
     elif args.action == 'experiment1_dropout_uncertainty':
-        predefined_args = [
-        {
-            #-p
-            'path': './data/stocknet-dataset/price/ourpped',
-            #-a
-            'att': 1,
-            #-l
-            'seq': 5,
-            #-u
-            'unit': 4,
-            #-l2
-            'alpha_l2': 1,
-            #-f
-            'fix_init': 0,
-            #-v
-            'adv': 1,
-            #-rl
-            'reload': 1,
-            #-la
-            'beta_adv': 0.01,
-            #-le
-            'epsilon_adv': 0.05,
-            'model_path': './saved_model/acl18_alstm/exp',
-            'model_save_path': './tmp/model',
-            'method': 'Adv-ALSTM',
-            'dataset': 'stocknet'
-        },
-        {
-            #-p
-            'path': './data/kdd17/ourpped/',
-            #-a
-            'att': 1,
-            #-l
-            'seq': 15,
-            #-u
-            'unit': 16,
-            #-l2
-            'alpha_l2': 0.001,
-            #-f
-            'fix_init': 1,
-            #-v
-            'adv': 1,
-            #-rl
-            'reload': 1,
-            #-la
-            'beta_adv': 0.05,
-            #-le
-            'epsilon_adv':  0.001,
-            'model_path': './saved_model/kdd17_alstm/model',
-            'model_save_path': './tmp/model',
-            'method': 'Adv-ALSTM',
-            'dataset': 'kdd17'
-        }]
-        benchmark_df = pd.read_csv('./experiment1/perf_dropout_results.csv')
+        benchmark_df = pd.read_csv('./experiment1/dropout/perf_dropout_results.csv')
         prob_arr = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0]
         perf_df = None
 
@@ -1901,43 +1886,50 @@ if __name__ == '__main__':
         #     with open(run_save_path.replace('/5', '/' + str(i + 1)) + '/best_valid_perf.pkl', 'wb') as perf_df_file:
         #         pickle.dump(perf_valid_arr[i], perf_df_file)
         
-        prob_m = ['std', 'entr']
-        for mi, m in enumerate(prob_m):
-            for index, row in benchmark_df.iterrows():
-                run_save_path = row['run save path']
-                with open(run_save_path + '/best_test_perf.pkl', "rb") as input_file:
-                    best_test_perf = pickle.load(input_file)
-                with open(run_save_path + '/best_valid_perf.pkl', "rb") as input_file:
-                    best_valid_perf = pickle.load(input_file)
-
-                val_pre_prob = best_valid_perf['prob_arr'][mi]
-                tes_pre_prob = best_test_perf['prob_arr'][mi]
+        for index, row in benchmark_df.iterrows():
+            run_save_path = row['run save path']
+            with open(run_save_path + '/best_test_perf.pkl', "rb") as input_file:
+                best_test_perf = pickle.load(input_file)
+            with open(run_save_path + '/best_valid_perf.pkl', "rb") as input_file:
+                best_valid_perf = pickle.load(input_file)
+            for mi, m in enumerate(best_valid_perf['prob_arr']):
+              
+                val_pre_prob = best_valid_perf['prob_arr'][mi]['val']
+                tes_pre_prob = best_test_perf['prob_arr'][mi]['val']
+                prob_measure = best_valid_perf['prob_arr'][mi]['measure']
 
                 #for i, a in enumerate(best_valid_perf['prob_arr']):
                 for p in prob_arr:
-                    valid_prob_arr = np.copy(best_valid_perf['prob_arr'][mi])
+                    valid_prob_arr = np.copy(val_pre_prob)
                     valid_pred_filter = np.copy(best_valid_perf['pred'])
                     valid_gt_filter = np.copy(best_valid_perf['gt'])
                     valid_filtered = 0
+                    valid_filtered_successfully = 0
                     for i, x in np.ndenumerate(valid_prob_arr):
                         filt = 1
                         if x >= p:
                             filt = 0
                             valid_filtered = valid_filtered + 1
+                            if valid_gt_filter[i] != valid_pred_filter[i]:
+                                valid_filtered_successfully = valid_filtered_successfully + 1
                         valid_pred_filter[i] = valid_pred_filter[i] * filt
                         valid_gt_filter[i] = valid_gt_filter[i] * filt
 
                     cur_valid_perf = evaluate(valid_pred_filter, valid_gt_filter, best_valid_perf['hinge'], additional_metrics=best_valid_perf['additional_metrics'])
 
-                    test_prob_arr = np.copy(best_test_perf['prob_arr'][mi])
+                    test_prob_arr = np.copy(tes_pre_prob)
                     test_pred_filter = np.copy(best_test_perf['pred'])
                     test_gt_filter = np.copy(best_test_perf['gt'])
                     test_filtered = 0
+                    test_filtered_successfully = 0
                     for i, x in np.ndenumerate(test_prob_arr):
                         filt = 1
-                        if x > p:
+                        if x >= p:
                             filt = 0
                             test_filtered = test_filtered + 1
+                            if test_gt_filter[i] != test_pred_filter[i]:
+                                test_filtered_successfully = test_filtered_successfully + 1
+
                         test_pred_filter[i] = test_pred_filter[i] * filt
                         test_gt_filter[i] = test_gt_filter[i] * filt
 
@@ -1961,7 +1953,7 @@ if __name__ == '__main__':
                             'valid rs': [cur_valid_perf['rs']],
                             'valid ps' : [cur_valid_perf['ps']],
                             'valid avg prob': [val_avg_prob],
-                            'prob measure': [m],
+                            'prob measure': [prob_measure],
                             'dropout' : [row['dropout']],
                             'run': [row['run']],
                             'prob confidence threshold': [p],
@@ -1969,8 +1961,12 @@ if __name__ == '__main__':
                             'run save path': [row['run save path']],
                             'total test predictions': [test_gt_filter.shape[0]],
                             'filtered test predictions': [test_filtered],
+                            'filtered test predictions sucessfully': [test_filtered_successfully],
+                            'filtered test predictions sucessful ratio': [test_filtered and test_filtered_successfully / test_filtered or 0],
                             'total valid predictions': [valid_gt_filter.shape[0]],
-                            'filtered valid predictions': [valid_filtered]
+                            'filtered valid predictions': [valid_filtered],
+                            'filtered valid predictions sucessfully': [valid_filtered_successfully],
+                            'filtered valid predictions sucessful ratio': [valid_filtered and valid_filtered_successfully / valid_filtered or 0],
                         }
 
                     df = pd.DataFrame(perf_dict)
@@ -2822,7 +2818,7 @@ if __name__ == '__main__':
 
     elif args.action == 'experiment2_replication':
         predefined_args = [  
-    {
+        {
             #-p
             'path': './data/stocknet-dataset/price/ourpped',
             #-a
@@ -2936,44 +2932,60 @@ if __name__ == '__main__':
                 load_mappings = True
             )
 
+            save_path = args.model_save_path.replace('/model', '') + '/' + dataset
+            mappings_save_path = save_path
+            if not os.path.exists(save_path):
+                os.mkdir(save_path)
+
+            val_mappings = copy.copy(pure_LSTM.val_mappings)
+            with open(mappings_save_path + '/val_mappings.pkl', 'wb') as val_mappings_file:
+                pickle.dump(val_mappings, val_mappings_file)
+
+            tes_mappings = copy.copy(pure_LSTM.tes_mappings)
+            with open(mappings_save_path + '/tes_mappings.pkl', 'wb') as tes_mappings_file:
+                pickle.dump(tes_mappings, tes_mappings_file)
+
             for r in runs_arr:
                 val_mappings_arr = []
                 tes_mappings_arr = []
                 best_valid_perf, best_test_perf, best_valid_pred, best_test_pred = pure_LSTM.train(return_perf=True, return_pred=True)
                 best_valid_pred = label(pure_LSTM.hinge, best_valid_pred)
                 best_test_pred = label(pure_LSTM.hinge, best_test_pred)
-
-                val_mappings = copy.copy(pure_LSTM.val_mappings)
+              
                 for i, m in enumerate(val_mappings):
                     m['run'] = r
                     m['method'] = method
                     m['dataset'] = dataset
-                    if best_valid_perf['pred'][i][0] == 0:
-                        m['next_day_action'] = -1
-                    elif best_valid_perf['pred'][i][0] == 1:
-                        m['next_day_action'] = 1
-                    prev_mapping = list(filter(lambda x: x['date'] == m['prev_date'] and x['ticker_filename'] == m['ticker_filename'], val_mappings))
-                    if len(prev_mapping) > 0:
-                        m['day_action'] = prev_mapping[0]['next_day_action']
+                    pred = best_valid_perf['pred'][i][0] 
+                    if pred == 0:
+                        m['day_action'] = -1
+                    elif pred == 1:
+                        m['day_action'] = 1
+
+                    next_mapping = list(filter(lambda x: x['prev_ins_ind'] == m['ins_ind'], val_mappings))                     
+                    if len(next_mapping) > 0:
+                        m['log_return'] = np.log(next_mapping[0]['adj_close'] / m['adj_close'])
                     else:
                         m['day_action'] = 0
+                        m['log_return'] = 0       
                     val_mappings_arr.append(m)
 
-                tes_mappings = copy.copy(pure_LSTM.tes_mappings)
                 for i, m in enumerate(tes_mappings):
                     m['run'] = r
                     m['method'] = method
                     m['dataset'] = dataset
-                    if best_test_perf['pred'][i][0] == 0:
-                        m['next_day_action'] = -1
-                    elif best_test_perf['pred'][i][0] == 1:
-                        m['next_day_action'] = 1
-                    prev_mapping = list(filter(lambda x: x['date'] == m['prev_date'] and x['ticker_filename'] == m['ticker_filename'], tes_mappings))
-                    if len(prev_mapping) > 0:
-                        m['day_action'] = prev_mapping[0]['next_day_action']
+                    pred = best_test_perf['pred'][i][0]
+                    if pred == 0:
+                        m['day_action'] = -1
+                    elif pred == 1:
+                        m['day_action'] = 1
+                   
+                    next_mapping = list(filter(lambda x: x['prev_ins_ind'] == m['ins_ind'], tes_mappings))                  
+                    if len(next_mapping) > 0:
+                        m['log_return'] = np.log(next_mapping[0]['adj_close'] / m['adj_close'])
                     else:
                         m['day_action'] = 0
-
+                        m['log_return'] = 0       
                     tes_mappings_arr.append(m)
             
                 val_mappings_df = pd.DataFrame(val_mappings_arr)
@@ -3023,7 +3035,9 @@ if __name__ == '__main__':
 
                 if not os.path.exists('experiment2'):
                     os.mkdir('experiment2')
-                perf_df.to_csv('experiment2/replication_pre_returns_results.csv', index = False)
+                if not os.path.exists('experiment2/replication'):
+                    os.mkdir('experiment2/replication')
+                perf_df.to_csv('experiment2/replication/replication_pre_returns_results.csv', index = False)
                 #dfi.export(perf_df,"experiment2/replication_pre_returns_results.png")
 
                 tickers = set(list(map(lambda x: x['ticker_filename'], val_mappings_arr)))
@@ -3056,7 +3070,9 @@ if __name__ == '__main__':
                     perf_ret_val_df = pd.concat([perf_ret_val_df, ret_val_df])      
                 if not os.path.exists('experiment2'):
                     os.mkdir('experiment2')
-                perf_ret_val_df.to_csv('experiment2/replication_pre_val_ticker_returns_results.csv', index = False)
+                if not os.path.exists('experiment2/replication'):
+                    os.mkdir('experiment2/replication')
+                perf_ret_val_df.to_csv('experiment2/replication/replication_pre_val_ticker_returns_results.csv', index = False)
 
 
                 tickers = set(list(map(lambda x: x['ticker_filename'], tes_mappings_arr)))
@@ -3089,7 +3105,9 @@ if __name__ == '__main__':
                     perf_ret_tes_df = pd.concat([perf_ret_tes_df, ret_tes_df])      
                 if not os.path.exists('experiment2'):
                     os.mkdir('experiment2')
-                perf_ret_tes_df.to_csv('experiment2/replication_pre_tes_ticker_returns_results.csv', index = False)
+                if not os.path.exists('experiment2/replication'):
+                    os.mkdir('experiment2/replication')
+                perf_ret_tes_df.to_csv('experiment2/replication/replication_pre_tes_ticker_returns_results.csv', index = False)
 
             avg_total_val_pre_returns = np.average(perf_df[(perf_df['dataset'] == dataset)]['total val log return'].to_numpy())
             avg_total_tes_pre_returns = np.average(perf_df[(perf_df['dataset'] == dataset) ]['total tes log return'].to_numpy())
@@ -3118,7 +3136,9 @@ if __name__ == '__main__':
 
             if not os.path.exists('experiment2'):
                 os.mkdir('experiment2')
-            perf_df2.to_csv('experiment2/replication_pre_returns_grouped_results.csv', index = False)
+            if not os.path.exists('experiment2/replication'):
+                os.mkdir('experiment2/replication')
+            perf_df2.to_csv('experiment2/replication/replication_pre_returns_grouped_results.csv', index = False)
             #dfi.export(perf_df2,"experiment2/replication_pre_returns_grouped_results.png")
 
             df_3 = pd.DataFrame(val_mappings_arr)
@@ -3130,7 +3150,9 @@ if __name__ == '__main__':
 
             if not os.path.exists('experiment2'):
                 os.mkdir('experiment2')
-            perf_df3.to_csv('experiment2/replication_val_mapping_results.csv', index = False)
+            if not os.path.exists('experiment2/replication'):
+                os.mkdir('experiment2/replication')
+            perf_df3.to_csv('experiment2/replication/replication_val_mapping_results.csv', index = False)
             #dfi.export(perf_df3,"experiment2/replication_val_mapping_results.png")
 
 
@@ -3143,218 +3165,197 @@ if __name__ == '__main__':
 
             if not os.path.exists('experiment2'):
                 os.mkdir('experiment2')
-            perf_df4.to_csv('experiment2/replication_tes_mapping_results.csv', index = False)
+            if not os.path.exists('experiment2/replication'):
+                os.mkdir('experiment2/replication')
+            perf_df4.to_csv('experiment2/replication/replication_tes_mapping_results.csv', index = False)
             #dfi.export(perf_df4,"experiment2/replication_tes_mapping_results.png")
     
     elif args.action == 'experiment2_dropout':
-        predefined_args = [
-        {
-            #-p
-            'path': './data/stocknet-dataset/price/ourpped',
-            #-a
-            'att': 1,
-            #-l
-            'seq': 5,
-            #-u
-            'unit': 4,
-            #-l2
-            'alpha_l2': 1,
-            #-f
-            'fix_init': 0,
-            #-v
-            'adv': 1,
-            #-rl
-            'reload': 1,
-            #-la
-            'beta_adv': 0.01,
-            #-le
-            'epsilon_adv': 0.05,
-            'model_path': './saved_model/acl18_alstm/exp',
-            'model_save_path': './tmp/model',
-            'method': 'Adv-ALSTM',
-            'dataset': 'stocknet',
-            'dropout_iterations': 2250,
-            'state_keep_prob': 0.85
-        },
-        {
-            #-p
-            'path': './data/kdd17/ourpped/',
-            #-a
-            'att': 1,
-            #-l
-            'seq': 15,
-            #-u
-            'unit': 16,
-            #-l2
-            'alpha_l2': 0.001,
-            #-f
-            'fix_init': 1,
-            #-v
-            'adv': 1,
-            #-rl
-            'reload': 1,
-            #-la
-            'beta_adv': 0.05,
-            #-le
-            'epsilon_adv':  0.001,
-            'model_path': './saved_model/kdd17_alstm/model',
-            'model_save_path': './tmp/model',
-            'method': 'Adv-ALSTM',
-            'dataset': 'kdd17', 
-            'dropout_iterations': 500,
-            'state_keep_prob': 0.05
-        }]
-        
+        prob_arr = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0]
         perf_df = None
         perf_df2 = None
         perf_df3 = None
         perf_df4 = None
         perf_ret_val_df = None
         perf_ret_tes_df = None
-        prob_arr = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
-        for pre in predefined_args:
-            args.path = pre['path']
-            args.att = pre['att']
-            args.seq = pre['seq']
-            args.unit = pre['unit']
-            args.alpha_l2 = pre['alpha_l2']
-            args.fix_init = pre['fix_init']
-            args.adv = pre['adv']
-            args.reload = pre['reload']
-            args.beta_adv = pre['beta_adv']
-            args.epsilon_adv = pre['epsilon_adv']
-            args.model_path = pre['model_path']
-            args.state_keep_prob = pre['state_keep_prob']
-            method = pre['method']
-            dataset = pre['dataset']
-            if dataset == 'stocknet':
-                tra_date = '2014-01-02'
-                val_date = '2015-08-03'
-                tes_date = '2015-10-01'
-            elif dataset == 'kdd17':
-                tra_date = '2007-01-03'
-                val_date = '2015-01-02'
-                tes_date = '2016-01-04'
-            else:
-                print('unexpected path: %s' % args.path)
-                exit(0)
 
-            parameters = {
-                'seq': int(args.seq),
-                'unit': int(args.unit),
-                'alp': float(args.alpha_l2),
-                'bet': float(args.beta_adv),
-                'eps': float(args.epsilon_adv),
-                'lr': float(args.learning_rate),
-                'meth': method,
-                'data': dataset,
-                'act': args.action,
-                'state_keep_prob': args.state_keep_prob
-            }
+        benchmark_df = pd.read_csv('./experiment2/replication/replication_pre_returns_results.csv')
+        benchmark_val_df = pd.read_csv('./experiment2/replication/replication_pre_val_ticker_returns_results.csv')
+        benchmark_tes_df = pd.read_csv('./experiment2/replication/replication_pre_tes_ticker_returns_results.csv')
+        benchmark_dp_df = pd.read_csv('./experiment1/dropout/perf_dropout_results.csv')                
 
-            benchmark_df = pd.read_csv('./experiment2/replication_pre_returns_results.csv')
+        if os.path.exists('experiment2/dropout/dropout_val_mapping_results.csv'):
+            os.remove('experiment2/dropout/dropout_val_mapping_results.csv')
+
+        if os.path.exists('experiment2/dropout/dropout_val_mapping_results.csv'):
+            os.remove('experiment2/dropout/dropout_tes_mapping_results.csv')
+
+        for index, row in benchmark_dp_df.iterrows():
+            method = row['method']
+            dataset = row['dataset']
+            dropout = row['dropout']
+            run = row['run']
+
+            best_benchmark_dp_model = benchmark_dp_df[(benchmark_dp_df['dataset'] == dataset) & (benchmark_dp_df['method'] == method)]
+            best_benchmark_dp_model = best_benchmark_dp_model.reset_index()
+            val_best_ind = best_benchmark_dp_model['valid acc'].idxmax()
+            val_best_benchmark_model = best_benchmark_dp_model.iloc[val_best_ind]
+
+            if val_best_benchmark_model['valid acc'] != row ['valid acc']:
+                continue
+
             best_benchmark_model = benchmark_df[(benchmark_df['dataset'] == dataset) & (benchmark_df['method'] == method)]
             best_benchmark_model = best_benchmark_model.reset_index()
-
             tes_best_ind = best_benchmark_model['total tes log return'].idxmax()
             tes_best_benchmark_model = best_benchmark_model.iloc[tes_best_ind]
-
-            benchmark_val_df = pd.read_csv('./experiment2/replication_pre_val_ticker_returns_results.csv')
             best_benchmark_val_model = benchmark_val_df[(benchmark_val_df['dataset'] == tes_best_benchmark_model['dataset']) & (benchmark_val_df['method'] == tes_best_benchmark_model['method']) & (benchmark_val_df['run'] == tes_best_benchmark_model['run'])]
+            best_benchmark_tes_model = benchmark_tes_df[(benchmark_tes_df['dataset'] == tes_best_benchmark_model['dataset']) & (benchmark_tes_df['method'] == tes_best_benchmark_model['method']) & (benchmark_tes_df['run'] == tes_best_benchmark_model['run'])] 
+            run_save_path = row['run save path']
+            mappings_save_path = './tmp/' + dataset
+            with open(mappings_save_path + '/val_mappings.pkl', 'rb') as val_mappings_file:
+                val_mappings = pickle.load(val_mappings_file)
+            with open(mappings_save_path + '/tes_mappings.pkl', 'rb') as tes_mappings_file:
+                tes_mappings = pickle.load(tes_mappings_file)
 
-            benchmark_tes_df = pd.read_csv('./experiment2/replication_pre_tes_ticker_returns_results.csv')
-            best_benchmark_tes_model =  benchmark_tes_df[(benchmark_tes_df['dataset'] == tes_best_benchmark_model['dataset']) & (benchmark_tes_df['method'] == tes_best_benchmark_model['method']) & (benchmark_tes_df['run'] == tes_best_benchmark_model['run'])]
+            with open(run_save_path + '/best_test_perf.pkl', "rb") as input_file:
+                best_test_perf = pickle.load(input_file)
+            with open(run_save_path + '/best_valid_perf.pkl', "rb") as input_file:
+                best_valid_perf = pickle.load(input_file)
+            
+            for mi, m in enumerate(best_valid_perf['prob_arr']):
+                val_pre_prob = best_valid_perf['prob_arr'][mi]['val']
+                tes_pre_prob = best_test_perf['prob_arr'][mi]['val']
+                prob_measure = best_valid_perf['prob_arr'][mi]['measure']
 
-            runs = 5
-            runs_arr = [*range(runs + 1)][1:]
-            perf_valid_arr = []
-            perf_test_arr = []
+                    #for i, a in enumerate(best_valid_perf['prob_arr']):
+                for p in prob_arr:
+                    valid_acc_count = 0
+                    valid_prob_arr = np.copy(val_pre_prob)
+                    best_valid_pred = np.copy(best_valid_perf['pred'])
+                    best_valid_gt =  np.copy(best_valid_perf['gt'])
 
-            pure_LSTM = AWLSTM(
-                data_path=args.path,
-                model_path=args.model_path,
-                model_save_path=args.model_save_path,
-                parameters=parameters,
-                steps=args.step,
-                epochs=args.epoch, batch_size=args.batch_size, gpu=args.gpu,
-                tra_date=tra_date, val_date=val_date, tes_date=tes_date, att=args.att,
-                hinge=args.hinge_lose, fix_init=args.fix_init, adv=args.adv,
-                reload=args.reload,
-                dropout_activation_function = 'avg',
-                load_mappings = True
-            )
+                    test_prob_arr = np.copy(tes_pre_prob)
+                    best_test_pred = np.copy(best_test_perf['pred'])
+                    best_test_gt =  np.copy(best_test_perf['gt'])
 
-            for r in runs_arr:
+                    perf_valid_arr = []
+                    perf_test_arr = []
 
-                best_valid_perf, best_test_perf, best_valid_pred, best_test_pred = pure_LSTM.train_monte_carlo_dropout(return_perf=True, return_pred=True, iterations=pre['dropout_iterations'])
-                best_valid_pred = label(pure_LSTM.hinge, best_valid_pred)
-                best_test_pred = label(pure_LSTM.hinge, best_test_pred)
-
-                val_mappings = copy.copy(pure_LSTM.val_mappings)
-                tes_mappings = copy.copy(pure_LSTM.tes_mappings)
-
-                for s in prob_arr:
                     val_mappings_arr = []
                     tes_mappings_arr = []
                     for i, m in enumerate(val_mappings):
-                        m['run'] = r
+                        m['run'] = run
                         m['method'] = method
                         m['dataset'] = dataset
-                        prob = best_valid_perf['prob_arr'][i]
+                        m['dropout'] = dropout
+                        m['prob_measure'] = prob_measure
+                        prob = valid_prob_arr[i]
+                        gt = best_valid_gt[i][0]
                         m['prob'] = prob
-                        m['prob_s'] = s
-                        pred = best_valid_perf['pred'][i][0]
-                        m['next_day_pred'] = pred
-                        if prob >= s:
-                            m['next_day_action'] = 0
-                        elif best_valid_perf['pred'][i][0] == 0:
-                            m['next_day_action'] = -1
-                        elif best_valid_perf['pred'][i][0] == 1:
-                            m['next_day_action'] = 1
-                        prev_mapping = list(filter(lambda x: x['date'] == m['prev_date'] and x['ticker_filename'] == m['ticker_filename'], val_mappings))
-                        if len(prev_mapping) > 0:
-                            m['day_action'] = prev_mapping[0]['next_day_action']
-                            m['day_action_pred'] = prev_mapping[0]['next_day_pred']
+                        m['prob_filter'] = p
+                        pred = best_valid_pred[i][0]
+                        m['day_pred'] = pred
+                        m['gt'] = gt
+                        if pred == 0:
+                            m['day_action_pred'] = -1
                         else:
+                            m['day_action_pred'] = 1
+                        if prob >= p:
                             m['day_action'] = 0
-                            m['day_action_pred'] = 0
+                            best_valid_pred[i][0] = 0
+                            best_valid_gt[i] = 0
+                        elif pred == 0:
+                            m['day_action'] = -1
+                        elif pred == 1:
+                            m['day_action'] = 1
+                       #next_mapping = list(filter(lambda x: x['prev_ins_ind'] == m['ins_ind'], val_mappings))
+                        if m['prev_ins_ind'] != None:
+                            prev_mapping = val_mappings[m['prev_ins_ind']]
+                        #if len(next_mapping) > 0:
+                            #m['log_return'] = np.log(next_mapping[0]['adj_close'] / m['adj_close'])
+                            m['log_return'] = np.log(m['adj_close'] / prev_mapping['adj_close'])
+                            gt_matches_log_return = True if (m['gt'] == 1 and m['log_return'] > 0) or (m['gt'] == 0 and m['log_return'] < 0) else False
+                            if gt_matches_log_return == True:
+                                m['matches_gt_day'] = 1
+                            else:
+                                m['matches_gt_day'] = 0
+                        else:
+                            m['matches_gt_day'] = -1
+                            m['day_action'] = 0
+                            m['log_return'] = 0       
                         val_mappings_arr.append(m)
 
                     for i, m in enumerate(tes_mappings):
-                        m['run'] = r
+                        m['run'] = run
                         m['method'] = method
                         m['dataset'] = dataset
-                        prob = best_test_perf['prob_arr'][i]
+                        m['dropout'] = dropout
+                        m['prob_measure'] = prob_measure
+                        prob = test_prob_arr[i]
+                        gt = best_test_gt[i][0]
                         m['prob'] = prob
-                        m['prob_s'] = s
-                        pred = best_test_perf['pred'][i][0]
-                        m['next_day_pred'] = pred
-                        if prob >= s:
-                            m['next_day_action'] = 0
-                        elif best_test_perf['pred'][i][0] == 0:
-                            m['next_day_action'] = -1
-                        elif best_test_perf['pred'][i][0] == 1:
-                            m['next_day_action'] = 1
-                        prev_mapping = list(filter(lambda x: x['date'] == m['prev_date'] and x['ticker_filename'] == m['ticker_filename'], tes_mappings))
-                        if len(prev_mapping) > 0:
-                            m['day_action'] = prev_mapping[0]['next_day_action']
-                            m['day_action_pred'] = prev_mapping[0]['next_day_pred']
+                        m['prob_filter'] = p
+                        pred = best_test_pred[i][0]
+                        m['day_pred'] = pred
+                        m['gt'] = gt
+                        if pred == 0:
+                            m['day_action_pred'] = -1
                         else:
+                            m['day_action_pred'] = 1
+                        if prob >= p:
                             m['day_action'] = 0
-                            m['day_action_pred'] = 0
+                            best_test_pred[i][0] = 0
+                            best_test_gt[i] = 0
+                        elif pred == 0:
+                            m['day_action'] = -1
+                        elif pred == 1:
+                            m['day_action'] = 1
+                        #next_mapping = list(filter(lambda x: x['prev_ins_ind'] == m['ins_ind'], tes_mappings))
+                        if m['prev_ins_ind'] != None:
+                            prev_mapping = tes_mappings[m['prev_ins_ind']]
+                        #if len(next_mapping) > 0:
+                            #m['log_return'] = np.log(next_mapping[0]['adj_close'] / m['adj_close'])                    
+                            m['log_return'] = np.log(m['adj_close'] / prev_mapping['adj_close'])    
+                            gt_matches_log_return = True if (m['gt'] == 1 and m['log_return'] > 0) or (m['gt'] == 0 and m['log_return'] < 0) else False
+                            if gt_matches_log_return == True:
+                                m['matches_gt_day'] = 1
+                            else:
+                                m['matches_gt_day'] = 0
+                        else:
+                            m['matches_gt_day'] = -1
+                            m['day_action'] = 0
+                            m['log_return'] = 0                      
 
                         tes_mappings_arr.append(m)
                 
+                    cur_valid_perf = evaluate(best_valid_pred, best_valid_gt, best_valid_perf['hinge'], additional_metrics=best_valid_perf['additional_metrics'])
+                    cur_tes_perf = evaluate(best_test_pred, best_test_gt, best_test_perf['hinge'], additional_metrics=best_test_perf['additional_metrics'])
+
                     val_mappings_df = pd.DataFrame(val_mappings_arr)
+                    val_mappings_df_aapl = val_mappings_df[(val_mappings_df['ticker_filename'] == 'AAPL.csv')]
+                    
                     tes_mappings_df = pd.DataFrame(tes_mappings_arr)
+                    tes_mappings_df_aapl = tes_mappings_df[(tes_mappings_df['ticker_filename'] == 'AAPL.csv')]
+
+                    if not os.path.exists('experiment2'):
+                        os.mkdir('experiment2')
+                    if not os.path.exists('experiment2/dropout'):
+                        os.mkdir('experiment2/dropout')
+                    tes_mappings_df_aapl.to_csv('experiment2/dropout/tes_mappings_df_aapl.csv', index = False)
 
                     val_mappings_df['log_return_action'] = val_mappings_df['log_return'] * val_mappings_df['day_action']
                     val_mappings_df['log_return_action_pred'] = val_mappings_df['log_return'] * val_mappings_df['day_action_pred']
                     val_pre_returns = val_mappings_df['log_return_action'].sum()
-                    
+                    val_not_matches_gt_count = val_mappings_df[(val_mappings_df['matches_gt_day'] == 0)].shape[0]
+                    val_matches_gt_count = val_mappings_df[(val_mappings_df['matches_gt_day'] == 1)].shape[0]
+                    val_matches_gt_acc = val_matches_gt_count / (val_matches_gt_count + val_not_matches_gt_count)
+
                     tes_mappings_df['log_return_action'] = tes_mappings_df['log_return'] * tes_mappings_df['day_action']
                     tes_mappings_df['log_return_action_pred'] = tes_mappings_df['log_return'] * tes_mappings_df['day_action_pred']
                     tes_pre_returns = tes_mappings_df['log_return_action'].sum()
+                    tes_not_matches_gt_day_count = tes_mappings_df[(tes_mappings_df['matches_gt_day'] == 0)].shape[0]
+                    tes_matches_gt_day_count = tes_mappings_df[(tes_mappings_df['matches_gt_day'] == 1)].shape[0]
+                    tes_matches_gt_acc = tes_matches_gt_day_count / (tes_matches_gt_day_count + tes_not_matches_gt_day_count)
 
                     val_pre_returns_avg = val_mappings_df['log_return_action'].mean()
                     tes_pre_returns_avg = tes_mappings_df['log_return_action'].mean()
@@ -3373,10 +3374,11 @@ if __name__ == '__main__':
                     perf_dict = {
                             'method': [method],
                             'dataset': [dataset],
+                            'dropout': [dropout],
                             'total val trading days skipped': [val_total_trading_days_skipped],
                             'total val trading days successful': [val_total_trading_days_successful],
                             'total val trading days successfuly skipped': [val_total_trading_days_correctly_skipped],
-                            'ratio of val tradiing days successfully skipped over total': [val_total_trading_days_correctly_skipped / val_total_trading_days_skipped],
+                            'ratio of val trading days successfully skipped over total': [val_total_trading_days_correctly_skipped / val_total_trading_days_skipped],
                             'total val trading days':[total_val_trading_days],
                             'total val log return': [val_pre_returns],
                             'avg val log return': [val_pre_returns_avg],
@@ -3386,15 +3388,22 @@ if __name__ == '__main__':
                             'total tes trading days skipped': [tes_total_trading_days_skipped],
                             'total tes trading days successful': [tes_total_trading_days_successful],
                             'total tes trading days successfuly skipped': [tes_total_trading_days_correctly_skipped],
-                            'ratio of tes tradiing days successfully skipped over total': [tes_total_trading_days_correctly_skipped / tes_total_trading_days_skipped],
+                            'ratio of tes trading days successfully skipped over total': [tes_total_trading_days_correctly_skipped / tes_total_trading_days_skipped],
                             'total tes trading days':[total_tes_trading_days],
                             'total tes log return': [tes_pre_returns],
                             'avg tes log return': [tes_pre_returns_avg],
                             'tes sharpe ratio': [tes_sharp_ratio],
                             'tes acc': [best_test_perf['acc'] * 100],
                             'tes mcc': [best_test_perf['mcc']],
-                            'run': [r],
-                            'prob': [s],
+                            'run': [run],
+                            'prob': [p],
+                            'prob measure': [prob_measure],
+                            'val acc filtered': [cur_valid_perf['acc'] * 100],
+                            'val mcc filtered': [cur_valid_perf['mcc']],
+                            'tes acc filtered': [cur_tes_perf['acc'] * 100],
+                            'tes mcc filtered': [cur_tes_perf['mcc']],
+                            'val gt acc' : [val_matches_gt_acc * 100],
+                            'tes gt acc' : [tes_matches_gt_acc * 100]
                         }
                     
                     df = pd.DataFrame(perf_dict)
@@ -3405,11 +3414,13 @@ if __name__ == '__main__':
 
                     if not os.path.exists('experiment2'):
                         os.mkdir('experiment2')
-                    perf_df.to_csv('experiment2/dropout_pre_returns_results.csv', index = False)
+                    if not os.path.exists('experiment2/dropout'):
+                        os.mkdir('experiment2/dropout')
+                    perf_df.to_csv('experiment2/dropout/dropout_pre_returns_results.csv', index = False)
                     #dfi.export(perf_df,"experiment2/dropout_pre_returns_results.png")
-               
+                
                     tickers = set(list(map(lambda x: x['ticker_filename'], val_mappings_arr)))
-                    ret_val_dic = {'method': [], 'dataset': [], 'avg_prob': [], 'run': [], 'ticker filename': [], 'total log return': [], 'avg log return': [], 'sharpe ratio': [], 'best benchmark log return': [], 'best benchmark sharpe ratio': [], 'total trading days skipped': [], 'total trading days successful': [], 'total trading days': [], 'total trading days correctly skipped': [], 'std log return before action': []}
+                    ret_val_dic = {'method': [], 'dataset': [], 'dropout': [], 'prob': [], 'prob measure': [], 'run': [], 'ticker filename': [], 'total log return': [], 'avg log return': [], 'sharpe ratio': [], 'best benchmark log return': [], 'best benchmark sharpe ratio': [], 'total trading days skipped': [], 'total trading days successful': [], 'total trading days': [], 'total trading days correctly skipped': [], 'std log return before action': []}
                     for t in tickers:
                         ticker_mapping = val_mappings_df[(val_mappings_df['ticker_filename'] == t)]
                         total_log_return = ticker_mapping['log_return_action'].sum()
@@ -3424,7 +3435,8 @@ if __name__ == '__main__':
 
                         ret_val_dic['method'].append(method)
                         ret_val_dic['dataset'].append(dataset)
-                        ret_val_dic['run'].append(r)  
+                        ret_val_dic['dropout'].append(dropout)
+                        ret_val_dic['run'].append(run)  
                         ret_val_dic['ticker filename'].append(t)
                         ret_val_dic['total log return'].append(total_log_return)
                         ret_val_dic['avg log return'].append(avg_log_return)
@@ -3435,7 +3447,8 @@ if __name__ == '__main__':
                         ret_val_dic['total trading days successful'].append(total_trading_days_successful)
                         ret_val_dic['total trading days'].append(total_trading_days)
                         ret_val_dic['total trading days correctly skipped'].append(total_trading_days_correctly_skipped)
-                        ret_val_dic['avg_prob'].append(s)
+                        ret_val_dic['prob'].append(p)
+                        ret_val_dic['prob measure'].append(prob_measure)
                         ret_val_dic['std log return before action'].append(std_log_return_before_action)
 
                     ret_val_df = pd.DataFrame(ret_val_dic)
@@ -3445,10 +3458,12 @@ if __name__ == '__main__':
                         perf_ret_val_df = pd.concat([perf_ret_val_df, ret_val_df])      
                     if not os.path.exists('experiment2'):
                         os.mkdir('experiment2')
-                    perf_ret_val_df.to_csv('experiment2/dropout_pre_val_ticker_returns_results.csv', index = False)
+                    if not os.path.exists('experiment2/dropout'):
+                        os.mkdir('experiment2/dropout')
+                    perf_ret_val_df.to_csv('experiment2/dropout/dropout_pre_val_ticker_returns_results.csv', index = False)
 
                     tickers = set(list(map(lambda x: x['ticker_filename'], tes_mappings_arr)))
-                    ret_tes_dic = {'method': [], 'dataset': [], 'avg_prob': [], 'run': [], 'ticker filename': [], 'total log return': [], 'avg log return': [], 'sharpe ratio': [], 'best benchmark log return': [], 'best benchmark sharpe ratio': [], 'total trading days skipped': [], 'total trading days successful': [], 'total trading days': [], 'total trading days correctly skipped': [], 'std log return before action': []}
+                    ret_tes_dic = {'method': [], 'dataset': [], 'dropout': [], 'prob': [], 'prob measure': [], 'run': [], 'ticker filename': [], 'total log return': [], 'avg log return': [], 'sharpe ratio': [], 'best benchmark log return': [], 'best benchmark sharpe ratio': [], 'total trading days skipped': [], 'total trading days successful': [], 'total trading days': [], 'total trading days correctly skipped': [], 'std log return before action': []}
 
                     for t in tickers:
                         ticker_mapping = tes_mappings_df[(tes_mappings_df['ticker_filename'] == t)]
@@ -3464,7 +3479,8 @@ if __name__ == '__main__':
 
                         ret_tes_dic['method'].append(method)
                         ret_tes_dic['dataset'].append(dataset)
-                        ret_tes_dic['run'].append(r)  
+                        ret_tes_dic['dropout'].append(dropout)
+                        ret_tes_dic['run'].append(run)  
                         ret_tes_dic['ticker filename'].append(t)
                         ret_tes_dic['total log return'].append(total_log_return)
                         ret_tes_dic['avg log return'].append(avg_log_return)
@@ -3475,7 +3491,8 @@ if __name__ == '__main__':
                         ret_tes_dic['total trading days successful'].append(total_trading_days_successful)
                         ret_tes_dic['total trading days'].append(total_trading_days)
                         ret_tes_dic['total trading days correctly skipped'].append(total_trading_days_correctly_skipped)
-                        ret_tes_dic['avg_prob'].append(s)
+                        ret_tes_dic['prob'].append(p)
+                        ret_tes_dic['prob measure'].append(prob_measure)
                         ret_tes_dic['std log return before action'].append(std_log_return_before_action)
 
                     ret_tes_df = pd.DataFrame(ret_tes_dic)
@@ -3485,67 +3502,69 @@ if __name__ == '__main__':
                         perf_ret_tes_df = pd.concat([perf_ret_tes_df, ret_tes_df])      
                     if not os.path.exists('experiment2'):
                         os.mkdir('experiment2')
-                    perf_ret_tes_df.to_csv('experiment2/dropout_pre_tes_ticker_returns_results.csv', index = False)
+                    if not os.path.exists('experiment2/dropout'):
+                        os.mkdir('experiment2/dropout')
 
-                    df_3 = pd.DataFrame(val_mappings_arr)
+                    perf_ret_tes_df.to_csv('experiment2/dropout/dropout_pre_tes_ticker_returns_results.csv', index = False)
 
-                    if perf_df3 is None:
-                        perf_df3 = df_3
-                    else:
-                        perf_df3 = pd.concat([perf_df3, df_3])         
+                    perf_df3 = pd.DataFrame(val_mappings_arr)   
 
                     if not os.path.exists('experiment2'):
                         os.mkdir('experiment2')
-                    perf_df3.to_csv('experiment2/dropout_val_mapping_results.csv', index = False)
+                    if not os.path.exists('experiment2/dropout'):
+                        os.mkdir('experiment2/dropout')
 
-                    df_4 = pd.DataFrame(tes_mappings_arr)
+                    perf_df3.to_csv('experiment2/dropout/dropout_val_mapping_results.csv', mode = 'a', index = False)
 
-                    if perf_df4 is None:
-                        perf_df4 = df_4
-                    else:
-                        perf_df4 = pd.concat([perf_df4, df_4])         
+                    perf_df4 = pd.DataFrame(tes_mappings_arr)
 
                     if not os.path.exists('experiment2'):
                         os.mkdir('experiment2')
-                    perf_df4.to_csv('experiment2/dropout_tes_mapping_results.csv', index = False)
+                    if not os.path.exists('experiment2/dropout'):
+                        os.mkdir('experiment2/dropout')
+                    perf_df4.to_csv('experiment2/dropout/dropout_tes_mapping_results.csv', mode = 'a', index = False)
 
-            for s in prob_arr:
-                avg_total_val_pre_returns = np.average(perf_df[(perf_df['dataset'] == dataset) & (perf_df['prob'] == s)]['total val log return'].to_numpy())
-                avg_total_tes_pre_returns = np.average(perf_df[(perf_df['dataset'] == dataset) & (perf_df['prob'] == s)]['total tes log return'].to_numpy())
-                avg_val_pre_returns = np.average(perf_df[(perf_df['dataset'] == dataset) & (perf_df['prob'] == s)]['avg val log return'].to_numpy())
-                avg_tes_pre_returns = np.average(perf_df[(perf_df['dataset'] == dataset) & (perf_df['prob'] == s)]['avg tes log return'].to_numpy())
+                for s in prob_arr:
+                    avg_total_val_pre_returns = np.average(perf_df[(perf_df['method'] == method) & (perf_df['dataset'] == dataset) & (perf_df['dropout'] == dropout) & (perf_df['prob'] == s) & (perf_df['prob measure'] == prob_measure)]['total val log return'].to_numpy())
+                    avg_total_tes_pre_returns = np.average(perf_df[(perf_df['method'] == method) & (perf_df['dataset'] == dataset) & (perf_df['dropout'] == dropout) & (perf_df['prob'] == s) & (perf_df['prob measure'] == prob_measure)]['total tes log return'].to_numpy())
+                    avg_val_pre_returns = np.average(perf_df[(perf_df['method'] == method) & (perf_df['dataset'] == dataset) & (perf_df['dropout'] == dropout) & (perf_df['prob'] == s) & (perf_df['prob measure'] == prob_measure)]['avg val log return'].to_numpy())
+                    avg_tes_pre_returns = np.average(perf_df[(perf_df['method'] == method) & (perf_df['dataset'] == dataset) & (perf_df['dropout'] == dropout) & (perf_df['prob'] == s) & (perf_df['prob measure'] == prob_measure)]['avg tes log return'].to_numpy())
 
-                avg_sharp_ratio_val = np.average(perf_df[(perf_df['dataset'] == dataset) & (perf_df['dataset'] ==s)]['val sharpe ratio'].to_numpy())
-                avg_sharp_ratio_tes = np.average(perf_df[(perf_df['dataset'] == dataset)  & (perf_df['dataset'] ==s)]['tes sharpe ratio'].to_numpy())
+                    avg_sharp_ratio_val = np.average(perf_df[(perf_df['method'] == method) & (perf_df['dataset'] == dataset) & (perf_df['dropout'] == dropout) & (perf_df['prob'] == s) & (perf_df['prob measure'] == prob_measure)]['val sharpe ratio'].to_numpy())
+                    avg_sharp_ratio_tes = np.average(perf_df[(perf_df['method'] == method) & (perf_df['dataset'] == dataset)  & (perf_df['dropout'] == dropout) & (perf_df['prob'] == s) & (perf_df['prob measure'] == prob_measure)]['tes sharpe ratio'].to_numpy())
 
-                perf_dict_2 = {
-                            'method': [method],
-                            'dataset': [dataset],
-                            'avg total val predicted return': [avg_total_val_pre_returns],
-                            'avg total tes predicted return': [avg_total_tes_pre_returns],
-                            'avg val predicted return': [avg_val_pre_returns],
-                            'avg tes predicted return': [avg_tes_pre_returns],
-                            'avg val sharpe ratio': [avg_sharp_ratio_val],
-                            'avg tes sharpe ratio': [avg_sharp_ratio_tes],
-                            'prob_avg': [s]              
-                        }
-                df_2 = pd.DataFrame(perf_dict_2)
+                    perf_dict_2 = {
+                                'method': [method],
+                                'dataset': [dataset],
+                                'dropout': [dropout],
+                                'avg total val predicted return': [avg_total_val_pre_returns],
+                                'avg total tes predicted return': [avg_total_tes_pre_returns],
+                                'avg val predicted return': [avg_val_pre_returns],
+                                'avg tes predicted return': [avg_tes_pre_returns],
+                                'avg val sharpe ratio': [avg_sharp_ratio_val],
+                                'avg tes sharpe ratio': [avg_sharp_ratio_tes],
+                                'prob': [s],
+                                'prob measure' : [prob_measure]           
+                            }
+                    df_2 = pd.DataFrame(perf_dict_2)
 
-                if perf_df2 is None:
-                    perf_df2 = df_2
-                else:
-                    perf_df2 = pd.concat([perf_df2, df_2])         
+                    if perf_df2 is None:
+                        perf_df2 = df_2
+                    else:
+                        perf_df2 = pd.concat([perf_df2, df_2])         
 
-                if not os.path.exists('experiment2'):
-                    os.mkdir('experiment2')
-                perf_df2.to_csv('experiment2/dropout_pre_returns_grouped_results.csv', index = False)
-                #dfi.export(perf_df2,"experiment2/dropout_pre_returns_grouped_results.png")
+                    if not os.path.exists('experiment2'):
+                        os.mkdir('experiment2')
+                    if not os.path.exists('experiment2/dropout'):
+                        os.mkdir('experiment2/dropout')
+                    perf_df2.to_csv('experiment2/dropout/dropout_pre_returns_grouped_results.csv', index = False)
+                    #dfi.export(perf_df2,"experiment2/dropout_pre_returns_grouped_results.png")
     else:
         print(args)
 
         dropout_activation_function = None
         if (args.state_keep_prob < 1):
-            dropout_activation_function = 'std'
+            dropout_activation_function = 'avg'
 
         if dataset == 'stocknet':
             tra_date = '2014-01-02'
