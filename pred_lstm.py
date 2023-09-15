@@ -1262,7 +1262,7 @@ if __name__ == '__main__':
                     help='Apply dropout to each layer')
     args = parser.parse_args()
 
-    args.action = 'replication'
+    args.action = 'experiment2_dropout'
     #args.dropout_wrapper = 1
     dataset = 'stocknet' if 'stocknet' in args.path else 'kdd17' if 'kdd17' in args.path else ''
     method = ''
@@ -1907,7 +1907,7 @@ if __name__ == '__main__':
                     valid_filtered_successfully = 0
                     for i, x in np.ndenumerate(valid_prob_arr):
                         filt = 1
-                        if x >= p:
+                        if x <= p:
                             filt = 0
                             valid_filtered = valid_filtered + 1
                             if valid_gt_filter[i] != valid_pred_filter[i]:
@@ -1924,7 +1924,7 @@ if __name__ == '__main__':
                     test_filtered_successfully = 0
                     for i, x in np.ndenumerate(test_prob_arr):
                         filt = 1
-                        if x >= p:
+                        if x <= p:
                             filt = 0
                             test_filtered = test_filtered + 1
                             if test_gt_filter[i] != test_pred_filter[i]:
@@ -2937,6 +2937,12 @@ if __name__ == '__main__':
             if not os.path.exists(save_path):
                 os.mkdir(save_path)
 
+            if os.path.exists(mappings_save_path + '/val_mappings.pkl'):
+                os.remove(mappings_save_path + '/val_mappings.pkl')
+
+            if os.path.exists(mappings_save_path + '/tes_mappings.pkl'):
+                os.remove(mappings_save_path + '/tes_mappings.pkl')
+
             val_mappings = copy.copy(pure_LSTM.val_mappings)
             with open(mappings_save_path + '/val_mappings.pkl', 'wb') as val_mappings_file:
                 pickle.dump(val_mappings, val_mappings_file)
@@ -2945,6 +2951,9 @@ if __name__ == '__main__':
             with open(mappings_save_path + '/tes_mappings.pkl', 'wb') as tes_mappings_file:
                 pickle.dump(tes_mappings, tes_mappings_file)
 
+            tes_mappings_df = pd.DataFrame(tes_mappings)
+            tes_mappings_df_aapl = tes_mappings_df[(tes_mappings_df['ticker_filename'] == 'GOOG.csv')]
+
             for r in runs_arr:
                 val_mappings_arr = []
                 tes_mappings_arr = []
@@ -2952,7 +2961,8 @@ if __name__ == '__main__':
                 best_valid_pred = label(pure_LSTM.hinge, best_valid_pred)
                 best_test_pred = label(pure_LSTM.hinge, best_test_pred)
               
-                for i, m in enumerate(val_mappings):
+                for i, ma in enumerate(val_mappings):
+                    m = copy.deepcopy(ma)
                     m['run'] = r
                     m['method'] = method
                     m['dataset'] = dataset
@@ -2970,7 +2980,8 @@ if __name__ == '__main__':
                         m['log_return'] = 0       
                     val_mappings_arr.append(m)
 
-                for i, m in enumerate(tes_mappings):
+                for i, ma in enumerate(tes_mappings):
+                    m = copy.deepcopy(ma)
                     m['run'] = r
                     m['method'] = method
                     m['dataset'] = dataset
@@ -2979,13 +2990,7 @@ if __name__ == '__main__':
                         m['day_action'] = -1
                     elif pred == 1:
                         m['day_action'] = 1
-                   
-                    next_mapping = list(filter(lambda x: x['prev_ins_ind'] == m['ins_ind'], tes_mappings))                  
-                    if len(next_mapping) > 0:
-                        m['log_return'] = np.log(next_mapping[0]['adj_close'] / m['adj_close'])
-                    else:
-                        m['day_action'] = 0
-                        m['log_return'] = 0       
+                      
                     tes_mappings_arr.append(m)
             
                 val_mappings_df = pd.DataFrame(val_mappings_arr)
@@ -3187,7 +3192,7 @@ if __name__ == '__main__':
         if os.path.exists('experiment2/dropout/dropout_val_mapping_results.csv'):
             os.remove('experiment2/dropout/dropout_val_mapping_results.csv')
 
-        if os.path.exists('experiment2/dropout/dropout_val_mapping_results.csv'):
+        if os.path.exists('experiment2/dropout/dropout_tes_mapping_results.csv'):
             os.remove('experiment2/dropout/dropout_tes_mapping_results.csv')
 
         for index, row in benchmark_dp_df.iterrows():
@@ -3196,27 +3201,44 @@ if __name__ == '__main__':
             dropout = row['dropout']
             run = row['run']
 
+            #get best experiment 1 dropout run by validation accuracy
             best_benchmark_dp_model = benchmark_dp_df[(benchmark_dp_df['dataset'] == dataset) & (benchmark_dp_df['method'] == method)]
             best_benchmark_dp_model = best_benchmark_dp_model.reset_index()
             val_best_ind = best_benchmark_dp_model['valid acc'].idxmax()
-            val_best_benchmark_model = best_benchmark_dp_model.iloc[val_best_ind]
+            val_best_benchmark_model = best_benchmark_dp_model.iloc[[val_best_ind]]
+            val_best_benchmark_model = val_best_benchmark_model.reset_index()
+            val_best_ind = val_best_benchmark_model['test acc'].idxmax()
+            val_best_benchmark_model = val_best_benchmark_model.iloc[val_best_ind]
 
-            if val_best_benchmark_model['valid acc'] != row ['valid acc']:
+
+            #continue because we want to do the experiment only on the best run
+            if val_best_benchmark_model['dropout'] != row ['dropout'] or \
+            val_best_benchmark_model['run'] != row ['run'] or \
+            val_best_benchmark_model['dataset'] != row ['dataset'] or \
+            val_best_benchmark_model['method'] != row ['method']:
                 continue
 
+            #get best experiment 2 replication run by total test log returns
             best_benchmark_model = benchmark_df[(benchmark_df['dataset'] == dataset) & (benchmark_df['method'] == method)]
             best_benchmark_model = best_benchmark_model.reset_index()
             tes_best_ind = best_benchmark_model['total tes log return'].idxmax()
             tes_best_benchmark_model = best_benchmark_model.iloc[tes_best_ind]
-            best_benchmark_val_model = benchmark_val_df[(benchmark_val_df['dataset'] == tes_best_benchmark_model['dataset']) & (benchmark_val_df['method'] == tes_best_benchmark_model['method']) & (benchmark_val_df['run'] == tes_best_benchmark_model['run'])]
-            best_benchmark_tes_model = benchmark_tes_df[(benchmark_tes_df['dataset'] == tes_best_benchmark_model['dataset']) & (benchmark_tes_df['method'] == tes_best_benchmark_model['method']) & (benchmark_tes_df['run'] == tes_best_benchmark_model['run'])] 
+            tes_best_benchmark_model_run = int(tes_best_benchmark_model['run'])
+
+            #get the validation and test results on the ticker level for the above best experiment 2 replication run
+            best_benchmark_val_model = benchmark_val_df[(benchmark_val_df['dataset'] == dataset) & (benchmark_val_df['method'] == method) & (benchmark_val_df['run'].astype(int) == tes_best_benchmark_model_run)]
+            best_benchmark_tes_model = benchmark_tes_df[(benchmark_tes_df['dataset'] == dataset) & (benchmark_tes_df['method'] == method) & (benchmark_tes_df['run'].astype(int) == tes_best_benchmark_model_run)] 
+            
             run_save_path = row['run save path']
+            
+            #load the validation and test mappings
             mappings_save_path = './tmp/' + dataset
             with open(mappings_save_path + '/val_mappings.pkl', 'rb') as val_mappings_file:
                 val_mappings = pickle.load(val_mappings_file)
             with open(mappings_save_path + '/tes_mappings.pkl', 'rb') as tes_mappings_file:
                 tes_mappings = pickle.load(tes_mappings_file)
 
+            #load validation and test performance files
             with open(run_save_path + '/best_test_perf.pkl', "rb") as input_file:
                 best_test_perf = pickle.load(input_file)
             with open(run_save_path + '/best_valid_perf.pkl', "rb") as input_file:
@@ -3243,7 +3265,8 @@ if __name__ == '__main__':
 
                     val_mappings_arr = []
                     tes_mappings_arr = []
-                    for i, m in enumerate(val_mappings):
+                    for i, ma in enumerate(val_mappings):
+                        m = copy.deepcopy(ma)
                         m['run'] = run
                         m['method'] = method
                         m['dataset'] = dataset
@@ -3260,7 +3283,7 @@ if __name__ == '__main__':
                             m['day_action_pred'] = -1
                         else:
                             m['day_action_pred'] = 1
-                        if prob >= p:
+                        if prob <= p:
                             m['day_action'] = 0
                             best_valid_pred[i][0] = 0
                             best_valid_gt[i] = 0
@@ -3269,23 +3292,20 @@ if __name__ == '__main__':
                         elif pred == 1:
                             m['day_action'] = 1
                        #next_mapping = list(filter(lambda x: x['prev_ins_ind'] == m['ins_ind'], val_mappings))
-                        if m['prev_ins_ind'] != None:
-                            prev_mapping = val_mappings[m['prev_ins_ind']]
+                        # if m['prev_ins_ind'] != None:
+                        #     prev_mapping = val_mappings[m['prev_ins_ind']]
                         #if len(next_mapping) > 0:
                             #m['log_return'] = np.log(next_mapping[0]['adj_close'] / m['adj_close'])
-                            m['log_return'] = np.log(m['adj_close'] / prev_mapping['adj_close'])
-                            gt_matches_log_return = True if (m['gt'] == 1 and m['log_return'] > 0) or (m['gt'] == 0 and m['log_return'] < 0) else False
-                            if gt_matches_log_return == True:
-                                m['matches_gt_day'] = 1
-                            else:
-                                m['matches_gt_day'] = 0
+                        gt_matches_log_return = True if (m['gt'] == 1 and m['log_return'] > 0) or (m['gt'] == 0 and m['log_return'] < 0) else False
+                        if gt_matches_log_return == True:
+                            m['matches_gt_day'] = 1
                         else:
-                            m['matches_gt_day'] = -1
-                            m['day_action'] = 0
-                            m['log_return'] = 0       
+                            m['matches_gt_day'] = 0
+                      
                         val_mappings_arr.append(m)
 
-                    for i, m in enumerate(tes_mappings):
+                    for i, ma in enumerate(tes_mappings):
+                        m = copy.deepcopy(ma)
                         m['run'] = run
                         m['method'] = method
                         m['dataset'] = dataset
@@ -3302,7 +3322,7 @@ if __name__ == '__main__':
                             m['day_action_pred'] = -1
                         else:
                             m['day_action_pred'] = 1
-                        if prob >= p:
+                        if prob <= p:
                             m['day_action'] = 0
                             best_test_pred[i][0] = 0
                             best_test_gt[i] = 0
@@ -3311,20 +3331,16 @@ if __name__ == '__main__':
                         elif pred == 1:
                             m['day_action'] = 1
                         #next_mapping = list(filter(lambda x: x['prev_ins_ind'] == m['ins_ind'], tes_mappings))
-                        if m['prev_ins_ind'] != None:
-                            prev_mapping = tes_mappings[m['prev_ins_ind']]
+                        # if m['prev_ins_ind'] != None:
+                        #     prev_mapping = tes_mappings[m['prev_ins_ind']]
                         #if len(next_mapping) > 0:
                             #m['log_return'] = np.log(next_mapping[0]['adj_close'] / m['adj_close'])                    
-                            m['log_return'] = np.log(m['adj_close'] / prev_mapping['adj_close'])    
-                            gt_matches_log_return = True if (m['gt'] == 1 and m['log_return'] > 0) or (m['gt'] == 0 and m['log_return'] < 0) else False
-                            if gt_matches_log_return == True:
-                                m['matches_gt_day'] = 1
-                            else:
-                                m['matches_gt_day'] = 0
+                           # m['log_return'] = np.log(m['adj_close'] / prev_mapping['adj_close'])    
+                        gt_matches_log_return = True if (m['gt'] == 1 and m['log_return'] > 0) or (m['gt'] == 0 and m['log_return'] < 0) else False
+                        if gt_matches_log_return == True:
+                            m['matches_gt_day'] = 1
                         else:
-                            m['matches_gt_day'] = -1
-                            m['day_action'] = 0
-                            m['log_return'] = 0                      
+                            m['matches_gt_day'] = 0       
 
                         tes_mappings_arr.append(m)
                 
@@ -3341,6 +3357,7 @@ if __name__ == '__main__':
                         os.mkdir('experiment2')
                     if not os.path.exists('experiment2/dropout'):
                         os.mkdir('experiment2/dropout')
+
                     tes_mappings_df_aapl.to_csv('experiment2/dropout/tes_mappings_df_aapl.csv', index = False)
 
                     val_mappings_df['log_return_action'] = val_mappings_df['log_return'] * val_mappings_df['day_action']
@@ -3370,6 +3387,8 @@ if __name__ == '__main__':
                     total_tes_trading_days = tes_mappings_df.shape[0]
                     val_total_trading_days_correctly_skipped = val_mappings_df[(val_mappings_df['day_action'] == 0) & (val_mappings_df['log_return_action_pred'] <= 0)].shape[0]
                     tes_total_trading_days_correctly_skipped = tes_mappings_df[(tes_mappings_df['day_action'] == 0) & (tes_mappings_df['log_return_action_pred'] <= 0)].shape[0]
+                    ratio_val_skipped_over_total = 1 if val_total_trading_days_skipped == 0 else val_total_trading_days_correctly_skipped / val_total_trading_days_skipped
+                    ratio_tes_skipped_over_total = 1 if tes_total_trading_days_skipped == 0 else tes_total_trading_days_correctly_skipped / tes_total_trading_days_skipped
 
                     perf_dict = {
                             'method': [method],
@@ -3378,7 +3397,7 @@ if __name__ == '__main__':
                             'total val trading days skipped': [val_total_trading_days_skipped],
                             'total val trading days successful': [val_total_trading_days_successful],
                             'total val trading days successfuly skipped': [val_total_trading_days_correctly_skipped],
-                            'ratio of val trading days successfully skipped over total': [val_total_trading_days_correctly_skipped / val_total_trading_days_skipped],
+                            'ratio of val trading days successfully skipped over total': [ratio_val_skipped_over_total],
                             'total val trading days':[total_val_trading_days],
                             'total val log return': [val_pre_returns],
                             'avg val log return': [val_pre_returns_avg],
@@ -3388,7 +3407,7 @@ if __name__ == '__main__':
                             'total tes trading days skipped': [tes_total_trading_days_skipped],
                             'total tes trading days successful': [tes_total_trading_days_successful],
                             'total tes trading days successfuly skipped': [tes_total_trading_days_correctly_skipped],
-                            'ratio of tes trading days successfully skipped over total': [tes_total_trading_days_correctly_skipped / tes_total_trading_days_skipped],
+                            'ratio of tes trading days successfully skipped over total': [ratio_tes_skipped_over_total],
                             'total tes trading days':[total_tes_trading_days],
                             'total tes log return': [tes_pre_returns],
                             'avg tes log return': [tes_pre_returns_avg],
@@ -3507,22 +3526,32 @@ if __name__ == '__main__':
 
                     perf_ret_tes_df.to_csv('experiment2/dropout/dropout_pre_tes_ticker_returns_results.csv', index = False)
 
-                    perf_df3 = pd.DataFrame(val_mappings_arr)   
+                    val_df = pd.DataFrame(val_mappings_arr)   
+
+                    if perf_df3 is None:
+                        perf_df3 = val_df
+                    else:
+                        perf_df3 = pd.concat([perf_df3, val_df])   
 
                     if not os.path.exists('experiment2'):
                         os.mkdir('experiment2')
                     if not os.path.exists('experiment2/dropout'):
                         os.mkdir('experiment2/dropout')
 
-                    perf_df3.to_csv('experiment2/dropout/dropout_val_mapping_results.csv', mode = 'a', index = False)
+                    perf_df3.to_csv('experiment2/dropout/dropout_val_mapping_results.csv', index = False)
 
-                    perf_df4 = pd.DataFrame(tes_mappings_arr)
+                    tes_df = pd.DataFrame(tes_mappings_arr)
+
+                    if perf_df4 is None:
+                        perf_df4 = tes_df
+                    else:
+                        perf_df4 = pd.concat([perf_df4, tes_df])   
 
                     if not os.path.exists('experiment2'):
                         os.mkdir('experiment2')
                     if not os.path.exists('experiment2/dropout'):
                         os.mkdir('experiment2/dropout')
-                    perf_df4.to_csv('experiment2/dropout/dropout_tes_mapping_results.csv', mode = 'a', index = False)
+                    perf_df4.to_csv('experiment2/dropout/dropout_tes_mapping_results.csv', index = False)
 
                 for s in prob_arr:
                     avg_total_val_pre_returns = np.average(perf_df[(perf_df['method'] == method) & (perf_df['dataset'] == dataset) & (perf_df['dropout'] == dropout) & (perf_df['prob'] == s) & (perf_df['prob measure'] == prob_measure)]['total val log return'].to_numpy())

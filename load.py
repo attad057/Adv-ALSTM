@@ -128,6 +128,8 @@ def load_cla_data(data_path, tra_date, val_date, tes_date, seq=2,
                     length = len(val_ins_ind[tic_ind])
                     val_n_adj_close = data_EOD[tic_ind][date_ind][4]
                     val_adj_close = data_EOD[tic_ind][date_ind][-1]
+                    prev_val_adj_close =  data_EOD[tic_ind][date_ind-1][-1]
+                    val_log_return = np.log(val_adj_close / prev_val_adj_close)
 
                     val_mappings.append({
                         'ins_ind': ins_ind,
@@ -136,6 +138,8 @@ def load_cla_data(data_path, tra_date, val_date, tes_date, seq=2,
                         'n_adj_close': val_n_adj_close,
                         'gt': val_gt[ins_ind, 0],
                         'adj_close': val_adj_close,
+                        'prev_adj_close': prev_val_adj_close,
+                        'log_return': val_log_return,
                         'prev_ins_ind': None if length == 0 else val_ins_ind[tic_ind][length - 1]
                     })
                     val_ins_ind[tic_ind].append(ins_ind)
@@ -167,8 +171,8 @@ def load_cla_data(data_path, tra_date, val_date, tes_date, seq=2,
                     length = len(tes_ins_ind[tic_ind])
                     tes_n_adj_close = data_EOD[tic_ind][date_ind][4]
                     tes_adj_close = data_EOD[tic_ind][date_ind][-1]
-                    if fnames[tic_ind] == 'AAPL.csv':
-                        d = 0
+                    prev_tes_adj_close =  data_EOD[tic_ind][date_ind-1][-1]
+                    tes_log_return = np.log(tes_adj_close / prev_tes_adj_close)
                     # if (tes_n_adj_close > 0 and tes_log_return < 0) or (tes_n_adj_close < 0 and tes_log_return > 0):
                     #     tes_log_return = -tes_log_return
 
@@ -179,6 +183,8 @@ def load_cla_data(data_path, tra_date, val_date, tes_date, seq=2,
                         'n_adj_close': tes_n_adj_close,
                         'gt': tes_gt[ins_ind, 0],
                         'adj_close': tes_adj_close,
+                        'prev_adj_close': prev_tes_adj_close,
+                        'log_return': tes_log_return,
                         'prev_ins_ind': None if length == 0 else tes_ins_ind[tic_ind][length - 1]
                     })
                     tes_ins_ind[tic_ind].append(ins_ind)
