@@ -10,11 +10,11 @@ def evaluate(prediction, ground_truth, hinge=False, reg=False, additional_metric
         return performance
 
     pred = label(hinge, prediction)
-    try:
-        performance['acc'] = accuracy_score(ground_truth, pred)
-    except Exception:
-        np.savetxt('prediction', pred, delimiter=',')
-        exit(0)
+    # try:
+    performance['acc'] = accuracy_score(ground_truth, pred)
+    # except Exception:
+    #     np.savetxt('prediction', pred, delimiter=',')
+    #     exit(0)
     performance['mcc'] = matthews_corrcoef(ground_truth, pred)
     performance['pred'] = pred
     performance['gt'] = ground_truth

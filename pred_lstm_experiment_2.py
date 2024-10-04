@@ -9,7 +9,10 @@ from time import time
 import pandas as pd
 import dataframe_image as dfi
 from scipy.stats import entropy
-import pickle                    
+import pickle  
+from pred_lstm import AWLSTM             
+from load import load_cla_data
+from evaluator import evaluate, label
 
 try:
     from tensorflow.python.ops.nn_ops import leaky_relu
@@ -24,9 +27,6 @@ except ImportError:
             alpha = ops.convert_to_tensor(alpha, name="alpha")
             return math_ops.maximum(alpha * features, features)
 
-from load import load_cla_data
-from evaluator import evaluate, label
-
 def get_run_aggregate(val_mappings_df, tes_mappings_df,
                         best_valid_perf, best_test_perf,
                         cur_valid_perf, cur_tes_perf,
@@ -40,6 +40,7 @@ def get_run_aggregate(val_mappings_df, tes_mappings_df,
         val_mappings_df['return_action_pred'] = val_mappings_df['return']  * val_mappings_df['day_action_pred']
         
         val_pre_returns =  val_mappings_df['return_action'].sum()
+        val_pre_returns_pred =  val_mappings_df['return_action_pred'].sum()
         #val_pre_returns = val_mappings_df['log_return_action'].sum()
         
         val_not_matches_gt_count = val_mappings_df[(val_mappings_df['matches_gt_day'] == 0)].shape[0]
@@ -80,6 +81,7 @@ def get_run_aggregate(val_mappings_df, tes_mappings_df,
                 'val trading days averted loss by skipping percentage of total skipped': [ratio_val_skipped_over_total * 100],
                 'total val trading days':[total_val_trading_days - val_total_trading_days_skipped],
                 'total val return': [val_pre_returns],
+                'total val return if without filtering': [val_pre_returns_pred],
                 'avg val return': [val_pre_returns_avg],
                 'val profit per trade': [val_profit_per_trade],
                 'val sharpe ratio': [val_sharp_ratio],
@@ -90,7 +92,8 @@ def get_run_aggregate(val_mappings_df, tes_mappings_df,
                 'val acc of y to log return' : [val_matches_gt_acc * 100],
                 'best benchmark val total return': [val_best_benchmark_model['total val return']], 
                 'best benchmark val total profit per trade': [val_best_benchmark_model['total val profit per trade']],
-                'best benchmark val avg sharpe ratio': [val_best_benchmark_model['val sharpe ratio']]                                                                                         
+                'best benchmark val avg sharpe ratio': [val_best_benchmark_model['val sharpe ratio']], 
+                'best benchmark val acc': [val_best_benchmark_model['val accuracy']]                                                                                  
             }
         
         df = pd.DataFrame(perf_dict)
@@ -102,6 +105,7 @@ def get_run_aggregate(val_mappings_df, tes_mappings_df,
         tes_mappings_df['return_action'] = tes_mappings_df['return']  * tes_mappings_df['day_action']
         tes_mappings_df['return_action_pred'] = tes_mappings_df['return']  * tes_mappings_df['day_action_pred']
               
+        tes_pre_returns_pred = tes_mappings_df['return_action_pred'].sum()
         tes_pre_returns = tes_mappings_df['return_action'].sum()
         #tes_pre_returns = tes_mappings_df['log_return_action'].sum()
 
@@ -137,6 +141,7 @@ def get_run_aggregate(val_mappings_df, tes_mappings_df,
                 'tes trading days averted loss by skipping percentage of total skipped': [ratio_tes_skipped_over_total * 100],
                 'total tes trading days':[total_tes_trading_days - tes_total_trading_days_skipped],
                 'total tes return': [tes_pre_returns],
+                'total tes return if without filtering': [tes_pre_returns_pred],
                 'avg tes return': [tes_pre_returns_avg],
                 'tes profit per trade': [tes_profit_per_trade],
                 'tes sharpe ratio': [tes_sharp_ratio],
@@ -147,7 +152,9 @@ def get_run_aggregate(val_mappings_df, tes_mappings_df,
                 'tes acc of y to log return' : [tes_matches_gt_acc * 100],
                 'best benchmark tes total return': [tes_best_benchmark_model['total tes return']], 
                 'best benchmark tes total profit per trade': [tes_best_benchmark_model['total tes profit per trade']],
-                'best benchmark tes avg sharpe ratio': [tes_best_benchmark_model['tes sharpe ratio']]
+                'best benchmark tes avg sharpe ratio': [tes_best_benchmark_model['tes sharpe ratio']],
+                'best benchmark tes total log return': [tes_best_benchmark_model['total tes log return']],
+                'best benchmark tes acc': [tes_best_benchmark_model['test accuracy']]                                                                                  
             }
         
         df_2 = pd.DataFrame(perf_dict_2)
@@ -320,7 +327,357 @@ def concat(df1, df2):
 
     return df1
 
-def experiment2_dropout():
+def run_experiment_2_replication(predefined_args, args):      
+    perf_df = None
+    perf_df2 = None
+    perf_df3 = None
+    perf_df4 = None
+    perf_ret_val_df = None
+    perf_ret_tes_df = None
+    for pre in predefined_args:
+        args.path = pre['path']
+        args.att = pre['att']
+        args.seq = pre['seq']
+        args.unit = pre['unit']
+        args.alpha_l2 = pre['alpha_l2']
+        args.fix_init = pre['fix_init']
+        args.adv = pre['adv']
+        args.reload = pre['reload']
+        args.beta_adv = pre['beta_adv']
+        args.epsilon_adv = pre['epsilon_adv']
+        args.model_path = pre['model_path']
+        method = pre['method']
+        dataset = pre['dataset']
+        if dataset == 'stocknet':
+            tra_date = '2014-01-02'
+            val_date = '2015-08-03'
+            tes_date = '2015-10-01'
+        elif dataset == 'kdd17':
+            tra_date = '2007-01-03'
+            val_date = '2015-01-02'
+            tes_date = '2016-01-04'
+        else:
+            print('unexpected path: %s' % args.path)
+            exit(0)
+
+        parameters = {
+            'seq': int(args.seq),
+            'unit': int(args.unit),
+            'alp': float(args.alpha_l2),
+            'bet': float(args.beta_adv),
+            'eps': float(args.epsilon_adv),
+            'lr': float(args.learning_rate),
+            'meth': method,
+            'data': dataset,
+            'act': args.action
+        }
+                
+
+        pure_LSTM = AWLSTM(
+            data_path=args.path,
+            model_path=args.model_path,
+            model_save_path=args.model_save_path,
+            parameters=parameters,
+            steps=args.step,
+            epochs=args.epoch, batch_size=args.batch_size, gpu=args.gpu,
+            tra_date=tra_date, val_date=val_date, tes_date=tes_date, att=args.att,
+            hinge=args.hinge_lose, fix_init=args.fix_init, adv=args.adv,
+            reload=args.reload,
+            dropout_activation_function = None,
+            load_mappings = True
+        )
+
+        save_path = args.model_save_path.replace('/model', '') + '/' + dataset
+        mappings_save_path = save_path
+        if not os.path.exists(save_path):
+            os.mkdir(save_path)
+
+        if os.path.exists(mappings_save_path + '/val_mappings.pkl'):
+            os.remove(mappings_save_path + '/val_mappings.pkl')
+
+        if os.path.exists(mappings_save_path + '/tes_mappings.pkl'):
+            os.remove(mappings_save_path + '/tes_mappings.pkl')
+
+        val_mappings = copy.copy(pure_LSTM.val_mappings)
+        with open(mappings_save_path + '/val_mappings.pkl', 'wb') as val_mappings_file:
+            pickle.dump(val_mappings, val_mappings_file)
+
+        tes_mappings = copy.copy(pure_LSTM.tes_mappings)
+        with open(mappings_save_path + '/tes_mappings.pkl', 'wb') as tes_mappings_file:
+            pickle.dump(tes_mappings, tes_mappings_file)
+
+        runs = 5
+        runs_arr = [*range(runs + 1)][1:]    
+
+        for r in runs_arr:
+
+            val_mappings_arr = []
+            tes_mappings_arr = []
+            best_valid_perf, best_test_perf = pure_LSTM.train(return_perf=True, return_pred=False)
+            best_valid_pred = best_valid_perf['pred']
+            best_test_pred = best_test_perf['pred']
+            
+            for i, ma in enumerate(val_mappings):
+                m = copy.deepcopy(ma)
+                m['run'] = r
+                m['method'] = method
+                m['dataset'] = dataset
+                pred = best_valid_perf['pred'][i][0] 
+                gt = best_valid_perf['gt'][i][0]
+                val_mapping_return = m['return']
+                if pred == gt and gt == 1 and val_mapping_return < 0:
+                    g = 1
+                elif pred == gt and gt == 0 and val_mapping_return > 0:
+                    g = 1
+                elif val_mapping_return == 0:
+                    g = 0
+
+                if pred == 0:
+                    m['day_action'] = -1
+                elif pred == 1:
+                    m['day_action'] = 1
+    
+                val_mappings_arr.append(m)
+
+            for i, ma in enumerate(tes_mappings):
+                m = copy.deepcopy(ma)
+                m['run'] = r
+                m['method'] = method
+                m['dataset'] = dataset
+                pred = best_test_perf['pred'][i][0]
+                if pred == 0:
+                    m['day_action'] = -1
+                elif pred == 1:
+                    m['day_action'] = 1
+                    
+                tes_mappings_arr.append(m)
+        
+            val_mappings_df = pd.DataFrame(val_mappings_arr)
+            tes_mappings_df = pd.DataFrame(tes_mappings_arr)
+
+            val_mappings_df['log_return_action'] = val_mappings_df['log_return'] * val_mappings_df['day_action']
+            val_mappings_df['return_action'] = val_mappings_df['return'] * val_mappings_df['day_action']
+            # val_pre_returns = val_mappings_df['log_return_action'].sum()
+            val_pre_returns = val_mappings_df['return_action'].sum()
+            val_returns = val_mappings_df['return'].sum()
+            val_pre_log_returns = val_mappings_df['log_return_action'].sum()
+
+            tes_mappings_df['log_return_action'] = tes_mappings_df['log_return'] * tes_mappings_df['day_action']
+            tes_mappings_df['return_action'] = tes_mappings_df['return'] * tes_mappings_df['day_action']
+            #tes_pre_returns = tes_mappings_df['log_return_action'].sum()
+            tes_pre_returns = tes_mappings_df['return_action'].sum()
+            tes_returns = tes_mappings_df['return'].sum()
+            tes_pre_log_returns = tes_mappings_df['log_return_action'].sum()
+
+            # val_pre_returns_avg = val_mappings_df['log_return_action'].mean()
+            # tes_pre_returns_avg = tes_mappings_df['log_return_action'].mean()
+            val_pre_returns_avg = val_mappings_df['return_action'].mean()
+            tes_pre_returns_avg = tes_mappings_df['return_action'].mean()
+        
+            # val_sharp_ratio = val_pre_returns_avg / val_mappings_df['log_return_action'].std()
+            # tes_sharp_ratio = tes_pre_returns_avg / tes_mappings_df['log_return_action'].std()
+        
+            val_sharp_ratio = val_pre_returns_avg / val_mappings_df['return_action'].std()
+            tes_sharp_ratio = tes_pre_returns_avg / tes_mappings_df['return_action'].std()
+
+            val_total_trading_days_skipped = val_mappings_df[(val_mappings_df['day_action'] == 0)].shape[0]
+            tes_total_trading_days_skipped = tes_mappings_df[(tes_mappings_df['day_action'] == 0)].shape[0]
+            # val_total_trading_days_successful = val_mappings_df[(val_mappings_df['log_return_action'] > 0)].shape[0]
+            # tes_total_trading_days_successful = tes_mappings_df[(tes_mappings_df['log_return_action'] > 0)].shape[0]
+            val_total_trading_days_successful = val_mappings_df[(val_mappings_df['return_action'] > 0)].shape[0]
+            tes_total_trading_days_successful = tes_mappings_df[(tes_mappings_df['return_action'] > 0)].shape[0]
+            
+            total_val_trading_days = val_mappings_df.shape[0]
+            total_tes_trading_days = tes_mappings_df.shape[0]
+        
+            perf_dict = {
+                    'method': [method],
+                    'dataset': [dataset],
+                    'val accuracy': [best_valid_perf['acc'] * 100],  
+                    'total val trading days skipped': [val_total_trading_days_skipped],
+                    'total val trading days successful': [val_total_trading_days_successful],
+                    'total val trading days': [total_val_trading_days-val_total_trading_days_skipped],
+                    'total val return': [val_pre_returns],
+                    'total val log return': [val_pre_log_returns],
+                    'total val profit per trade': [val_pre_returns/(total_val_trading_days-val_total_trading_days_skipped)],
+                    'val total investment': [val_returns],
+                    'avg val return': [val_pre_returns_avg],
+                    'val sharpe ratio': [val_sharp_ratio],
+                    'test accuracy': [best_test_perf['acc'] * 100],  
+                    'total tes trading days skipped': [tes_total_trading_days_skipped],
+                    'total tes trading days successful': [tes_total_trading_days_successful],
+                    'total tes trading days': [total_tes_trading_days-tes_total_trading_days_skipped],
+                    'total tes profit per trade': [tes_pre_returns/(total_tes_trading_days-tes_total_trading_days_skipped)],
+                    'total tes return': [tes_pre_returns],
+                    'total tes log return': [tes_pre_log_returns],
+                    'tes total investment': [tes_returns],
+                    'avg tes return': [tes_pre_returns_avg],
+                    'tes sharpe ratio': [tes_sharp_ratio],
+                    'run': [r]
+                }
+
+            df = pd.DataFrame(perf_dict)
+            if perf_df is None:
+                perf_df = df
+            else:
+                perf_df = pd.concat([perf_df, df])            
+
+            if not os.path.exists('experiment2'):
+                os.mkdir('experiment2')
+            if not os.path.exists('experiment2/replication'):
+                os.mkdir('experiment2/replication')
+            perf_df.to_csv('experiment2/replication/replication_pre_returns_results.csv', index = False)
+            #dfi.export(perf_df,"experiment2/replication_pre_returns_results.png")
+
+            tickers = set(list(map(lambda x: x['ticker_filename'], val_mappings_arr)))
+
+            ret_val_dic = {'method': [], 'dataset': [], 'run': [], 'ticker filename': [], 'total return': [], 'profit per trade': [], 'total log return': [], 'total investment':[], 'avg return': [], 'avg log return': [], 'sharpe ratio': [], 'total trading days skipped': [], 'total trading days successful': [], 'total trading days': []}
+            for t in tickers:
+                ticker_mapping = val_mappings_df[(val_mappings_df['ticker_filename'] == t)]
+                total_log_return = ticker_mapping['log_return_action'].sum()
+                avg_log_return = ticker_mapping['log_return_action'].mean()  
+                total_return = ticker_mapping['return_action'].sum()
+                avg_return = ticker_mapping['return_action'].mean()    
+                total_return_inv = ticker_mapping['return'].sum()   
+
+                #sharp_ratio = avg_log_return / ticker_mapping['log_return_action'].std() 
+                sharp_ratio = avg_return / ticker_mapping['return_action'].std() 
+                total_trading_days_skipped = ticker_mapping[(ticker_mapping['day_action'] == 0)].shape[0]
+                #total_trading_days_successful = ticker_mapping[((ticker_mapping['log_return_action'] > 0) & (ticker_mapping['day_action'] > 0)) | ((ticker_mapping['log_return_action'] < 0) & (ticker_mapping['day_action'] < 0))].shape[0]
+                total_trading_days_successful = ticker_mapping[((ticker_mapping['return_action'] > 0) & (ticker_mapping['day_action'] > 0)) | ((ticker_mapping['return_action'] < 0) & (ticker_mapping['day_action'] < 0))].shape[0]
+                total_trading_days = ticker_mapping.shape[0]
+
+                ret_val_dic['method'].append(method)
+                ret_val_dic['dataset'].append(dataset)
+                ret_val_dic['run'].append(r)  
+                ret_val_dic['ticker filename'].append(t)
+                ret_val_dic['total return'].append(total_return)
+                ret_val_dic['total log return'].append(total_log_return)
+                ret_val_dic['profit per trade'].append(total_return - (total_trading_days-total_trading_days_skipped))
+                ret_val_dic['avg return'].append(avg_return)
+                ret_val_dic['avg log return'].append(avg_log_return)
+                ret_val_dic['total investment'].append(total_return_inv)
+                ret_val_dic['sharpe ratio'].append(sharp_ratio)
+                ret_val_dic['total trading days skipped'].append(total_trading_days_skipped)
+                ret_val_dic['total trading days successful'].append(total_trading_days_successful)
+                ret_val_dic['total trading days'].append(total_trading_days)
+
+            ret_val_df = pd.DataFrame(ret_val_dic)
+            if perf_ret_val_df is None:
+                perf_ret_val_df = ret_val_df
+            else:
+                perf_ret_val_df = pd.concat([perf_ret_val_df, ret_val_df])      
+            if not os.path.exists('experiment2'):
+                os.mkdir('experiment2')
+            if not os.path.exists('experiment2/replication'):
+                os.mkdir('experiment2/replication')
+            perf_ret_val_df.to_csv('experiment2/replication/replication_pre_val_ticker_returns_results.csv', index = False)
+
+
+            tickers = set(list(map(lambda x: x['ticker_filename'], tes_mappings_arr)))
+            ret_tes_dic = {'method': [], 'dataset': [], 'run': [], 'ticker filename': [], 'total return': [], 'profit per trade': [], 'total log return': [], 'avg return': [], 'avg log return': [], 'total investment': [], 'sharpe ratio': [], 'total trading days skipped': [], 'total trading days successful': [], 'total trading days': []}
+
+            for t in tickers:
+                ticker_mapping = tes_mappings_df[(tes_mappings_df['ticker_filename'] == t)]
+                total_log_return = ticker_mapping['log_return_action'].sum()
+                avg_log_return = ticker_mapping['log_return_action'].mean() 
+                total_return = ticker_mapping['return_action'].sum()
+                total_return_inv = ticker_mapping['return'].sum()
+                avg_return = ticker_mapping['return_action'].mean()       
+                sharp_ratio = avg_return / ticker_mapping['return_action'].std()  
+                # sharp_ratio = avg_return / ticker_mapping['log_return_action'].std() 
+                total_trading_days_skipped = ticker_mapping[(ticker_mapping['day_action'] == 0)].shape[0]
+                # total_trading_days_successful = ticker_mapping[((ticker_mapping['log_return_action'] > 0) & (ticker_mapping['day_action'] > 0)) | ((ticker_mapping['log_return_action'] < 0) & (ticker_mapping['day_action'] < 0))].shape[0]
+                total_trading_days_successful = ticker_mapping[((ticker_mapping['return_action'] > 0) & (ticker_mapping['day_action'] > 0)) | ((ticker_mapping['return_action'] < 0) & (ticker_mapping['day_action'] < 0))].shape[0]
+
+                total_trading_days = ticker_mapping.shape[0]
+
+                ret_tes_dic['method'].append(method)
+                ret_tes_dic['dataset'].append(dataset)
+                ret_tes_dic['run'].append(r)  
+                ret_tes_dic['ticker filename'].append(t)
+                ret_tes_dic['total return'].append(total_return)
+                ret_tes_dic['total log return'].append(total_log_return)
+                ret_tes_dic['profit per trade'].append(total_return - (total_trading_days-total_trading_days_skipped))
+                ret_tes_dic['avg return'].append(avg_return)
+                ret_tes_dic['avg log return'].append(avg_log_return)
+                ret_tes_dic['total investment'].append(total_return_inv)
+                ret_tes_dic['sharpe ratio'].append(sharp_ratio)
+                ret_tes_dic['total trading days skipped'].append(total_trading_days_skipped)
+                ret_tes_dic['total trading days successful'].append(total_trading_days_successful)
+                ret_tes_dic['total trading days'].append(total_trading_days)
+
+            ret_tes_df = pd.DataFrame(ret_tes_dic)
+            if perf_ret_tes_df is None:
+                perf_ret_tes_df = ret_tes_df
+            else:
+                perf_ret_tes_df = pd.concat([perf_ret_tes_df, ret_tes_df])      
+            if not os.path.exists('experiment2'):
+                os.mkdir('experiment2')
+            if not os.path.exists('experiment2/replication'):
+                os.mkdir('experiment2/replication')
+            perf_ret_tes_df.to_csv('experiment2/replication/replication_pre_tes_ticker_returns_results.csv', index = False)
+
+            df_3 = pd.DataFrame(val_mappings_arr)
+
+            if perf_df3 is None:
+                perf_df3 = df_3
+            else:
+                perf_df3 = pd.concat([perf_df3, df_3])         
+
+            if not os.path.exists('experiment2'):
+                os.mkdir('experiment2')
+            if not os.path.exists('experiment2/replication'):
+                os.mkdir('experiment2/replication')
+            perf_df3.to_csv('experiment2/replication/replication_val_mapping_results.csv', index = False)
+            #dfi.export(perf_df3,"experiment2/replication_val_mapping_results.png")
+
+            df_4 = pd.DataFrame(tes_mappings_arr)
+
+            if perf_df4 is None:
+                perf_df4 = df_4
+            else:
+                perf_df4 = pd.concat([perf_df4, df_4])         
+
+            if not os.path.exists('experiment2'):
+                os.mkdir('experiment2')
+            if not os.path.exists('experiment2/replication'):
+                os.mkdir('experiment2/replication')
+            perf_df4.to_csv('experiment2/replication/replication_tes_mapping_results.csv', index = False)
+            #dfi.export(perf_df4,"experiment2/replication_tes_mapping_results.png")
+
+        avg_total_val_pre_returns = np.average(perf_df[(perf_df['dataset'] == dataset)]['total val return'].to_numpy())
+        avg_total_tes_pre_returns = np.average(perf_df[(perf_df['dataset'] == dataset) ]['total tes return'].to_numpy())
+        avg_val_pre_returns = np.average(perf_df[(perf_df['dataset'] == dataset)]['avg val return'].to_numpy())
+        avg_tes_pre_returns = np.average(perf_df[(perf_df['dataset'] == dataset)]['avg tes return'].to_numpy())
+
+        avg_sharp_ratio_val = np.average(perf_df[(perf_df['dataset'] == dataset)]['val sharpe ratio'].to_numpy())
+        avg_sharp_ratio_tes = np.average(perf_df[(perf_df['dataset'] == dataset)]['tes sharpe ratio'].to_numpy())
+
+        perf_dict_2 = {
+                    'method': [method],
+                    'dataset': [dataset],
+                    'avg total val predicted return': [avg_total_val_pre_returns],
+                    'avg total tes predicted return': [avg_total_tes_pre_returns],
+                    'avg val predicted return': [avg_val_pre_returns],
+                    'avg tes predicted return': [avg_tes_pre_returns],
+                    'avg val sharpe ratio': [avg_sharp_ratio_val],
+                    'avg tes sharpe ratio': [avg_sharp_ratio_tes]              
+                }
+        df_2 = pd.DataFrame(perf_dict_2)
+
+        if perf_df2 is None:
+            perf_df2 = df_2
+        else:
+            perf_df2 = pd.concat([perf_df2, df_2])         
+
+        if not os.path.exists('experiment2'):
+            os.mkdir('experiment2')
+        if not os.path.exists('experiment2/replication'):
+            os.mkdir('experiment2/replication')
+        perf_df2.to_csv('experiment2/replication/replication_pre_returns_grouped_results.csv', index = False)
+
+def run_experiment_2_dropout():
     prob_arr = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0]
     perf_df_v = None
     perf_df_t = None
