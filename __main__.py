@@ -1,6 +1,7 @@
-from pred_lstm_replication import run_replication
+from pred_lstm_replication import run_replication, t_test_summary_array
 from pred_lstm_experiment_1 import run_experiment_1_dropout, run_experiment_1_dropout_uncertainty             
 from pred_lstm_experiment_2 import run_experiment_2_replication, run_experiment_2_dropout
+from report import report_dropout_best_runs, report_best_dropout_model_comparison_test, report_dropout_grouped_runs, report_best_dropout_run_binary_graphs, report_compare_ticker_replication, report_uncertainty_heatmap, report_dropout_uncertainty, report_pr_curves, report_best_uncertainty_model_comparison, report_best_model_comparison_test
 import argparse
 
 if __name__ == '__main__':
@@ -49,9 +50,9 @@ if __name__ == '__main__':
     parser.add_argument('-sp', '--state_keep_prob', type=float, default=1,
                     help='Apply dropout to each layer')
     args = parser.parse_args()
-    args.action = 'experiment2_dropout'
     dataset = 'stocknet' if 'stocknet' in args.path else 'kdd17' if 'kdd17' in args.path else ''
     method = ''
+    args.action = 'experiment2_dropout'
     
     if args.action == 'replication':
         predefined_args = [ 
@@ -282,7 +283,7 @@ if __name__ == '__main__':
 
         perf_df, perf_df2 = run_experiment_1_dropout(predefined_args, args)
     elif args.action == 'experiment1_dropout_uncertainty':
-        run_experiment_1_dropout_uncertainty()
+        run_experiment_1_dropout_uncertainty(['normal', 'true', 'false'])
     elif args.action == 'experiment2_dropout':
         run_experiment_2_dropout()
     elif args.action == 'experiment2_replication':
@@ -344,6 +345,56 @@ if __name__ == '__main__':
        ]
 
         run_experiment_2_replication(predefined_args, args)
+    elif args.action == 'report':
+        #add f1 score to test table
+
+        #T-test summary for replication ALSTM benchmark vs replication
+        # mean1_array, std1_array, n1_array = [0.1043, 0.0261, 54.90, 51.94], [1e-2, 1e-2, 7e-1, 7e-1], [5, 5, 5, 5]  # Group 1: mean, standard deviation, sample size
+        # mean2_array, std2_array, n2_array = [0.0910, 0.0150, 54.44, 51.43], [2e-2, 7e-3, 9e-1, 4e-1], [5, 5, 5, 5]  # Group 2: mean, standard deviation, sample size
+        # t_test_summary_array(mean1_array, std1_array, n1_array, mean2_array, std2_array, n2_array)
+
+        #Experiment 1 dropout
+        #1. Line graph describing aggregate statistics for dropout experiment 1
+        # report_dropout_grouped_runs('valid acc', 'Valid ACC Score', 'ACC Score', True)
+        # report_dropout_grouped_runs('valid mcc', 'Valid MCC Score', 'MCC Score', False)
+        
+        #2. Line graph of best runs for dropout experiment 1
+        #report_dropout_best_runs('valid acc', 'Valid ACC %', 'ACC %')
+        #report_dropout_best_runs('valid mcc', 'Valid MCC Score', 'MCC Score')
+
+        #Experiment 1 dropout uncertainty
+        #1. Bar graph for best uncertainty model comparison
+        #report_best_uncertainty_model_comparison('valid acc', 'Valid ACC %', True)
+        #report_best_uncertainty_model_comparison('valid mcc', 'Valid MCC %', False)
+
+        #2. Heatmap for uncertainty measures
+        #report_uncertainty_heatmap('valid acc', 'Valid ACC %')
+
+        #3. Line graph of acc vs uncertainty thresholds
+        #report_dropout_uncertainty('valid acc', 'Valid ACC %', 'ACC %', ['#87CEEB', '#4169E1', '#000080'])
+        #report_dropout_uncertainty('valid mcc', 'Valid MCC Score', 'MCC Score', ['#228B22', '#98FB98', '#808000'])
+        
+        #4. Bar Graph for best model comparison
+        #report_best_model_comparison_test('test acc', 'Test ACC %', True)
+        #report_best_model_comparison_test('test mcc', 'Test MCC %', False)
+        report_best_dropout_model_comparison_test('test acc', 'Test ACC %', True)
+        report_best_dropout_model_comparison_test('test mcc', 'Test MCC Score', False)
+
+
+        #report_pr_curves('valid acc', 'Valid ACC %', 'ACC %', ['#87CEEB', '#4169E1', '#000080'])
+        #report_best_dropout_run_binary_graphs('valid acc')
+        #report_compare_ticker_replication('valid acc', 'Valid ACC %')
+
+        #density plot ? (not needed)
+        #correlation heatmap
+        #correlation graph mcc / acc
+        #statistical test ?
+
+        #correlation heatmap return / sharpes ratio
+        #boxplot of stocks
+        #uncertainty heatmap
+        #accumultive returns
+        #accumlative Sharpes ratio
     else:
         print(args)
 

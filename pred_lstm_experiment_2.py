@@ -41,7 +41,7 @@ def get_run_aggregate(val_mappings_df, tes_mappings_df,
         
         val_pre_returns =  val_mappings_df['return_action'].sum()
         val_pre_returns_pred =  val_mappings_df['return_action_pred'].sum()
-        #val_pre_returns = val_mappings_df['log_return_action'].sum()
+        val_pre_log_returns = val_mappings_df['log_return_action'].sum()
         
         val_not_matches_gt_count = val_mappings_df[(val_mappings_df['matches_gt_day'] == 0)].shape[0]
         val_matches_gt_count = val_mappings_df[(val_mappings_df['matches_gt_day'] == 1)].shape[0]
@@ -82,6 +82,7 @@ def get_run_aggregate(val_mappings_df, tes_mappings_df,
                 'total val trading days':[total_val_trading_days - val_total_trading_days_skipped],
                 'total val return': [val_pre_returns],
                 'total val return if without filtering': [val_pre_returns_pred],
+                'total val log return': [val_pre_log_returns],
                 'avg val return': [val_pre_returns_avg],
                 'val profit per trade': [val_profit_per_trade],
                 'val sharpe ratio': [val_sharp_ratio],
@@ -93,6 +94,7 @@ def get_run_aggregate(val_mappings_df, tes_mappings_df,
                 'best benchmark val total return': [val_best_benchmark_model['total val return']], 
                 'best benchmark val total profit per trade': [val_best_benchmark_model['total val profit per trade']],
                 'best benchmark val avg sharpe ratio': [val_best_benchmark_model['val sharpe ratio']], 
+                'best benchmark val total log return': [val_best_benchmark_model['total tes log return']],
                 'best benchmark val acc': [val_best_benchmark_model['val accuracy']]                                                                                  
             }
         
@@ -107,7 +109,7 @@ def get_run_aggregate(val_mappings_df, tes_mappings_df,
               
         tes_pre_returns_pred = tes_mappings_df['return_action_pred'].sum()
         tes_pre_returns = tes_mappings_df['return_action'].sum()
-        #tes_pre_returns = tes_mappings_df['log_return_action'].sum()
+        tes_pre_log_returns = tes_mappings_df['log_return_action'].sum()
 
         tes_not_matches_gt_day_count = tes_mappings_df[(tes_mappings_df['matches_gt_day'] == 0)].shape[0]
         tes_matches_gt_day_count = tes_mappings_df[(tes_mappings_df['matches_gt_day'] == 1)].shape[0]
@@ -142,6 +144,7 @@ def get_run_aggregate(val_mappings_df, tes_mappings_df,
                 'total tes trading days':[total_tes_trading_days - tes_total_trading_days_skipped],
                 'total tes return': [tes_pre_returns],
                 'total tes return if without filtering': [tes_pre_returns_pred],
+                'total tes log return': [tes_pre_log_returns],
                 'avg tes return': [tes_pre_returns_avg],
                 'tes profit per trade': [tes_profit_per_trade],
                 'tes sharpe ratio': [tes_sharp_ratio],
@@ -187,11 +190,20 @@ def get_signals(prob_arr, best_pred, best_gt, mappings,
         pred = best_pred[i][0]
         m['day_pred'] = pred
         m['gt'] = gt
+
+        perc = (prob/np.max(prob_arr)) * 100
+        #perc = (prob/m['max_prob']) * 100
+    
+
         if pred == 0:
             m['day_action_pred'] = -1
         else:
             m['day_action_pred'] = 1
-        if prob > (1-p):
+
+        if abs(m['return']) > 100:
+            ret = m['return']
+        if perc > (100-(p*100)):
+        #if prob > (1-p):
             m['day_action'] = 0
             mappings_pred_mask_arr.append(False)
             mappings_gt_mask_arr.append(False)
@@ -251,10 +263,11 @@ def get_ticker_aggregate(tickers, mappings_df, best_benchmark_model,
                 'sharpe ratio beats benchmark':[]}
     for t in tickers:
         ticker_mapping = mappings_df[(mappings_df['ticker_filename'] == t)]
-        total_log_return = ticker_mapping['log_return_action'].sum()
-        avg_log_return = ticker_mapping['log_return_action'].mean()
-        total_return = ticker_mapping['return_action'].sum()
-        avg_total_return = ticker_mapping['return_action'].mean()
+        ticker_mapping_without_skipped_days = ticker_mapping[(ticker_mapping['return_action'] != 0)]
+        total_log_return = ticker_mapping_without_skipped_days['log_return_action'].sum()
+        avg_log_return = ticker_mapping_without_skipped_days['log_return_action'].mean()
+        total_return = ticker_mapping_without_skipped_days['return_action'].sum()
+        avg_total_return = ticker_mapping_without_skipped_days['return_action'].mean()
 
         sharp_ratio = avg_total_return / ticker_mapping['return_action'].std() 
         std_log_return_before_action = ticker_mapping['return'].std()        
@@ -457,16 +470,14 @@ def run_experiment_2_replication(predefined_args, args):
 
             val_mappings_df['log_return_action'] = val_mappings_df['log_return'] * val_mappings_df['day_action']
             val_mappings_df['return_action'] = val_mappings_df['return'] * val_mappings_df['day_action']
-            # val_pre_returns = val_mappings_df['log_return_action'].sum()
             val_pre_returns = val_mappings_df['return_action'].sum()
-            val_returns = val_mappings_df['return'].sum()
+            val_total_investments = val_mappings_df['prev_adj_close'].abs().sum()
             val_pre_log_returns = val_mappings_df['log_return_action'].sum()
 
             tes_mappings_df['log_return_action'] = tes_mappings_df['log_return'] * tes_mappings_df['day_action']
             tes_mappings_df['return_action'] = tes_mappings_df['return'] * tes_mappings_df['day_action']
-            #tes_pre_returns = tes_mappings_df['log_return_action'].sum()
             tes_pre_returns = tes_mappings_df['return_action'].sum()
-            tes_returns = tes_mappings_df['return'].sum()
+            tes_total_investments = tes_mappings_df['prev_adj_close'].abs().sum()
             tes_pre_log_returns = tes_mappings_df['log_return_action'].sum()
 
             # val_pre_returns_avg = val_mappings_df['log_return_action'].mean()
@@ -494,23 +505,25 @@ def run_experiment_2_replication(predefined_args, args):
                     'method': [method],
                     'dataset': [dataset],
                     'val accuracy': [best_valid_perf['acc'] * 100],  
+                    'val mcc': [best_valid_perf['mcc']],  
                     'total val trading days skipped': [val_total_trading_days_skipped],
                     'total val trading days successful': [val_total_trading_days_successful],
                     'total val trading days': [total_val_trading_days-val_total_trading_days_skipped],
                     'total val return': [val_pre_returns],
                     'total val log return': [val_pre_log_returns],
                     'total val profit per trade': [val_pre_returns/(total_val_trading_days-val_total_trading_days_skipped)],
-                    'val total investment': [val_returns],
+                    'val total investment': [val_total_investments],
                     'avg val return': [val_pre_returns_avg],
                     'val sharpe ratio': [val_sharp_ratio],
                     'test accuracy': [best_test_perf['acc'] * 100],  
+                    'test mcc': [best_test_perf['mcc']],  
                     'total tes trading days skipped': [tes_total_trading_days_skipped],
                     'total tes trading days successful': [tes_total_trading_days_successful],
                     'total tes trading days': [total_tes_trading_days-tes_total_trading_days_skipped],
                     'total tes profit per trade': [tes_pre_returns/(total_tes_trading_days-tes_total_trading_days_skipped)],
                     'total tes return': [tes_pre_returns],
                     'total tes log return': [tes_pre_log_returns],
-                    'tes total investment': [tes_returns],
+                    'tes total investment': [tes_total_investments],
                     'avg tes return': [tes_pre_returns_avg],
                     'tes sharpe ratio': [tes_sharp_ratio],
                     'run': [r]
@@ -538,7 +551,7 @@ def run_experiment_2_replication(predefined_args, args):
                 avg_log_return = ticker_mapping['log_return_action'].mean()  
                 total_return = ticker_mapping['return_action'].sum()
                 avg_return = ticker_mapping['return_action'].mean()    
-                total_return_inv = ticker_mapping['return'].sum()   
+                total_return_inv = ticker_mapping['prev_adj_close'].abs().sum()   
 
                 #sharp_ratio = avg_log_return / ticker_mapping['log_return_action'].std() 
                 sharp_ratio = avg_return / ticker_mapping['return_action'].std() 
@@ -553,7 +566,7 @@ def run_experiment_2_replication(predefined_args, args):
                 ret_val_dic['ticker filename'].append(t)
                 ret_val_dic['total return'].append(total_return)
                 ret_val_dic['total log return'].append(total_log_return)
-                ret_val_dic['profit per trade'].append(total_return - (total_trading_days-total_trading_days_skipped))
+                ret_val_dic['profit per trade'].append(total_return / (total_trading_days-total_trading_days_skipped))
                 ret_val_dic['avg return'].append(avg_return)
                 ret_val_dic['avg log return'].append(avg_log_return)
                 ret_val_dic['total investment'].append(total_return_inv)
@@ -582,7 +595,7 @@ def run_experiment_2_replication(predefined_args, args):
                 total_log_return = ticker_mapping['log_return_action'].sum()
                 avg_log_return = ticker_mapping['log_return_action'].mean() 
                 total_return = ticker_mapping['return_action'].sum()
-                total_return_inv = ticker_mapping['return'].sum()
+                total_return_inv = ticker_mapping['prev_adj_close'].abs().sum()
                 avg_return = ticker_mapping['return_action'].mean()       
                 sharp_ratio = avg_return / ticker_mapping['return_action'].std()  
                 # sharp_ratio = avg_return / ticker_mapping['log_return_action'].std() 
@@ -598,7 +611,7 @@ def run_experiment_2_replication(predefined_args, args):
                 ret_tes_dic['ticker filename'].append(t)
                 ret_tes_dic['total return'].append(total_return)
                 ret_tes_dic['total log return'].append(total_log_return)
-                ret_tes_dic['profit per trade'].append(total_return - (total_trading_days-total_trading_days_skipped))
+                ret_tes_dic['profit per trade'].append(total_return / (total_trading_days-total_trading_days_skipped))
                 ret_tes_dic['avg return'].append(avg_return)
                 ret_tes_dic['avg log return'].append(avg_log_return)
                 ret_tes_dic['total investment'].append(total_return_inv)
@@ -657,12 +670,26 @@ def run_experiment_2_replication(predefined_args, args):
         perf_dict_2 = {
                     'method': [method],
                     'dataset': [dataset],
+                    'avg val accuracy': [np.average(perf_df[(perf_df['dataset'] == dataset)]['val accuracy'].to_numpy())],
+                    'avg tes accuracy': [np.average(perf_df[(perf_df['dataset'] == dataset)]['test accuracy'].to_numpy())],
+                    'avg val mcc': [np.average(perf_df[(perf_df['dataset'] == dataset)]['val mcc'].to_numpy())],
+                    'avg tes mcc': [np.average(perf_df[(perf_df['dataset'] == dataset)]['test mcc'].to_numpy())],      
+                    'avg total val investment': [np.average(perf_df[(perf_df['dataset'] == dataset)]['val total investment'].to_numpy())],
+                    'avg total tes investment': [np.average(perf_df[(perf_df['dataset'] == dataset)]['tes total investment'].to_numpy())],
+                    'avg val profit per trade': [np.average(perf_df[(perf_df['dataset'] == dataset)]['total val profit per trade'].to_numpy())],
+                    'avg tes profit per trade': [np.average(perf_df[(perf_df['dataset'] == dataset)]['total tes profit per trade'].to_numpy())],
+                    'std val profit per trade': [np.std(perf_df[(perf_df['dataset'] == dataset)]['total val profit per trade'].to_numpy())],
+                    'std tes profit per trade': [np.std(perf_df[(perf_df['dataset'] == dataset)]['total tes profit per trade'].to_numpy())],
                     'avg total val predicted return': [avg_total_val_pre_returns],
                     'avg total tes predicted return': [avg_total_tes_pre_returns],
+                    'std total val predicted return': [np.std(perf_df[(perf_df['dataset'] == dataset)]['total val return'].to_numpy())],
+                    'std total tes predicted return': [np.std(perf_df[(perf_df['dataset'] == dataset)]['total tes return'].to_numpy())],
                     'avg val predicted return': [avg_val_pre_returns],
                     'avg tes predicted return': [avg_tes_pre_returns],
                     'avg val sharpe ratio': [avg_sharp_ratio_val],
-                    'avg tes sharpe ratio': [avg_sharp_ratio_tes]              
+                    'avg tes sharpe ratio': [avg_sharp_ratio_tes],
+                    'avg val log return': [np.average(perf_df[(perf_df['dataset'] == dataset)]['total val log return'].to_numpy())],
+                    'avg tes log return': [np.average(perf_df[(perf_df['dataset'] == dataset)]['total tes log return'].to_numpy())],           
                 }
         df_2 = pd.DataFrame(perf_dict_2)
 
@@ -679,6 +706,7 @@ def run_experiment_2_replication(predefined_args, args):
 
 def run_experiment_2_dropout():
     prob_arr = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0]
+    #prob_arr = [1, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1, 0.5, 0]
     perf_df_v = None
     perf_df_t = None
     perf_df2 = None
@@ -686,14 +714,18 @@ def run_experiment_2_dropout():
     perf_df4 = None
     perf_ret_val_df = None
     perf_ret_tes_df = None
-    perf_tuned_df = None
+    perf_val_tuned_df = None
+    perf_tes_tuned_df = None
     perf_ret_val_prob_df = None
     perf_ret_val_tuned_df = None
+    perf_ret_tes_tuned_df = None
 
     benchmark_df = pd.read_csv('./experiment2/replication/replication_pre_returns_results.csv')
     benchmark_val_df = pd.read_csv('./experiment2/replication/replication_pre_val_ticker_returns_results.csv')
     benchmark_tes_df = pd.read_csv('./experiment2/replication/replication_pre_tes_ticker_returns_results.csv')
     benchmark_dp_df = pd.read_csv('./experiment1/dropout/perf_dropout_results.csv')                
+    benchmark_dp_uncertainty_df = pd.read_csv('./experiment1/dropout_uncertainty/perf_dropout_results.csv')      
+               
 
     if os.path.exists('experiment2/dropout/dropout_val_mapping_results.csv'):
         os.remove('experiment2/dropout/dropout_val_mapping_results.csv')
@@ -708,35 +740,39 @@ def run_experiment_2_dropout():
         run = row['run']
 
         #get best experiment 1 dropout run by validation accuracy
-        best_benchmark_dp_model = benchmark_dp_df[(benchmark_dp_df['dataset'] == dataset) & (benchmark_dp_df['method'] == method)]
+        best_benchmark_dp_model = benchmark_dp_df[(benchmark_dp_df['dataset'] == dataset) & (benchmark_dp_df['method'] == method) & (benchmark_dp_df['dropout'] == dropout)]
         best_benchmark_dp_model = best_benchmark_dp_model.reset_index()
         val_best_ind = best_benchmark_dp_model['valid acc'].idxmax()
         val_best_benchmark_model = best_benchmark_dp_model.iloc[[val_best_ind]]
         val_best_benchmark_model = val_best_benchmark_model.reset_index()
-        val_best_ind = val_best_benchmark_model['test acc'].idxmax()
+        val_best_ind = val_best_benchmark_model['valid mcc'].idxmax()
         val_best_benchmark_model = val_best_benchmark_model.iloc[val_best_ind]
 
-        dropout = val_best_benchmark_model['dropout']
+        #dropout = val_best_benchmark_model['dropout']
 
-        #continue because we want to do the experiment only on the best run
-        if val_best_benchmark_model['dropout'] != row ['dropout'] or \
-        val_best_benchmark_model['run'] != row ['run'] or \
-        val_best_benchmark_model['dataset'] != row ['dataset'] or \
-        val_best_benchmark_model['method'] != row ['method']:
-            continue
+        benchmark_dp_uncertainty_df_model = benchmark_dp_uncertainty_df[(benchmark_dp_uncertainty_df['dataset'] == dataset) & (benchmark_dp_uncertainty_df['method'] == method) & (benchmark_dp_uncertainty_df['dropout'] == dropout)]
+        benchmark_dp_uncertainty_df_model = benchmark_dp_uncertainty_df_model.reset_index()
+        val_best_ind = benchmark_dp_uncertainty_df_model['valid acc'].idxmax()
+        val_best_benchmark_model = benchmark_dp_uncertainty_df_model.iloc[[val_best_ind]]
+        # val_best_benchmark_model = val_best_benchmark_model.reset_index()
+        # val_best_ind = val_best_benchmark_model['valid acc'].idxmax()
+        # val_best_benchmark_model = val_best_benchmark_model.iloc[val_best_ind]
 
-        #get best experiment 2 replication run by total validation returns
+        #continue because we want to do the experiment only on the best dropout
+        # if dropout != row ['dropout']:
+        #     continue
+        #get best experiment 2 replication run
         best_benchmark_model = benchmark_df[(benchmark_df['dataset'] == dataset) & (benchmark_df['method'] == method)]
         best_benchmark_model = best_benchmark_model.reset_index()
-        #val_best_ind = best_benchmark_model['total val log return'].idxmax()
-        val_best_ind = best_benchmark_model['total val return'].idxmax()
+        val_best_ind = best_benchmark_model['total val log return'].idxmax()
+        #val_best_ind = best_benchmark_model['val accuracy'].idxmax()
         val_best_benchmark_model = best_benchmark_model.iloc[val_best_ind]
         val_best_benchmark_model_run = int(val_best_benchmark_model['run'])
 
-        #get best experiment 2 replication run by total test returns
+        #get best experiment 2 replication run
         best_benchmark_model = best_benchmark_model.reset_index()
-        #tes_best_ind = best_benchmark_model['total tes log return'].idxmax()
-        tes_best_ind = best_benchmark_model['total tes return'].idxmax()
+        tes_best_ind = best_benchmark_model['total val log return'].idxmax()
+        #tes_best_ind = best_benchmark_model['val accuracy'].idxmax()
         tes_best_benchmark_model = best_benchmark_model.iloc[tes_best_ind]
         tes_best_benchmark_model_run = int(tes_best_benchmark_model['run'])
 
@@ -762,8 +798,13 @@ def run_experiment_2_dropout():
         for mi, m in enumerate(best_valid_perf['prob_arr']):
             val_pre_prob = best_valid_perf['prob_arr'][mi]['val']
             tes_pre_prob = best_test_perf['prob_arr'][mi]['val']
+            print('Processing Dropout: ' + str(dropout) + ', Run: ' + str(run) + ', Method: ' + method + ', Dataset: ' + dataset + ', Prob Measure: ' + best_valid_perf['prob_arr'][mi]['measure'])
+
+            #val_mappings = get_max_prob_mappings(val_pre_prob, val_mappings)
+            #tes_mappings = get_max_prob_mappings(tes_pre_prob, tes_mappings)
+
             prob_measure = best_valid_perf['prob_arr'][mi]['measure']
-            
+
             val_mappings_tuned_arr = []
 
             #iterate at each of the threshold levels
@@ -771,8 +812,9 @@ def run_experiment_2_dropout():
             
                 #calculate signals by catering for uncertainty, filtering based on the threshold level (validation)
                 val_mappings_arr, cur_valid_perf = get_signals(val_pre_prob, best_valid_perf['pred'], best_valid_perf['gt'], val_mappings,
-                                                 run, method, dataset, dropout, prob_measure,
-                                                 p, best_valid_perf['hinge'], best_valid_perf['additional_metrics'])
+                                                 
+                                                run, method, dataset, dropout, prob_measure,
+                                                p, best_valid_perf['hinge'], best_valid_perf['additional_metrics'])
                 
                 #calculate signals by catering for uncertainty, filtering based on the threshold level (test)
                 tes_mappings_arr, cur_tes_perf = get_signals(tes_pre_prob, best_test_perf['pred'], best_test_perf['gt'], tes_mappings,
@@ -825,53 +867,7 @@ def run_experiment_2_dropout():
                     tes_mappings_df_ticker = tes_mappings_df[(tes_mappings_df['ticker_filename'] == t)]
                     save_file(tes_mappings_df_ticker, 'experiment2/dropout/day/dropout_tes_mappings_results/' + dataset + '/' + prob_measure + '/' + str(p) + '/' + t)
 
-            #Find best prob for each ticker according to highest validation log return
-            ret_val_prob_dic = {'method': [], 'dataset': [], 'dropout': [], 'run': [], 'best prob': [], 'prob measure': [], 'ticker filename': [], 'total val log return': []}
-            for t in val_tickers:
-                ticker_mapping = perf_ret_val_df[(perf_ret_val_df['ticker filename'] == t) & (perf_ret_val_df['method'] == method) & (perf_ret_val_df['dataset'] == dataset) & (perf_ret_val_df['dropout'] == dropout) & (perf_ret_val_df['prob measure'] == prob_measure)]                        
-                ticker_mapping = ticker_mapping.reset_index()
-                val_best_ind = ticker_mapping['total log return'].idxmax()
-                val_best_prob = ticker_mapping.iloc[val_best_ind]['prob']
-                val_best_log_return = ticker_mapping.iloc[val_best_ind]['total log return']
-
-                ret_val_prob_dic['method'].append(method)
-                ret_val_prob_dic['dataset'].append(dataset)
-                ret_val_prob_dic['dropout'].append(dropout)
-                ret_val_prob_dic['run'].append(run)  
-                ret_val_prob_dic['best prob'].append(val_best_prob)
-                ret_val_prob_dic['prob measure'].append(prob_measure)
-                ret_val_prob_dic['ticker filename'].append(t)
-                ret_val_prob_dic['total val log return'].append(val_best_log_return)
-
-            ret_val_prob_df = pd.DataFrame(ret_val_prob_dic)
-            perf_ret_val_prob_df = concat(perf_ret_val_prob_df, ret_val_prob_df)
-            save_file(perf_ret_val_prob_df, 'experiment2/dropout/dropout_pre_val_prob_ticker_returns_results.csv')
-            
-
-            #calculate signals by catering for uncertainty, filtering based on the threshold level per ticker (validation)
-            val_mappings_tuned_arr, cur_valid_perf = get_signals(val_pre_prob, best_valid_perf['pred'], best_valid_perf['gt'], val_mappings,
-                                                run, method, dataset, dropout, prob_measure,
-                                                p, best_valid_perf['hinge'], best_valid_perf['additional_metrics'], ret_val_prob_df)
-            
-            val_mappings_tuned_df = pd.DataFrame(val_mappings_tuned_arr)        
-
-            df_tuned_v, df_tuned_t, val_mappings_tuned_df, placeholder = get_run_aggregate(val_mappings_tuned_df, None,
-                                            best_valid_perf, None,
-                                            cur_valid_perf, None,
-                                            val_best_benchmark_model, None, method,
-                                            dataset, dropout, run, p, prob_measure)
-                    
-            perf_tuned_df = concat(perf_tuned_df, df_tuned_v)
-            save_file(perf_tuned_df, 'experiment2/dropout/run/dropout_pre_tuned_returns_results.csv')
-            
-
-            ret_val_tuned_df = get_ticker_aggregate(val_tickers, val_mappings_tuned_df, best_benchmark_val_model,
-                                                  method, dataset, dropout, run, p, prob_measure, ret_val_prob_df)
-            
-            perf_ret_val_tuned_df = concat(perf_ret_val_tuned_df, ret_val_tuned_df)
-            save_file(perf_ret_val_tuned_df, 'experiment2/dropout/ticker/dropout_pre_val_prob_ticker_returns_results.csv')
-            
-                    
+            #aggregate data before tuning
             for s in prob_arr:
                 avg_total_val_pre_returns = np.average(perf_df_v[(perf_df_v['method'] == method) & (perf_df_v['dataset'] == dataset) & (perf_df_v['dropout'] == dropout) & (perf_df_v['prob'] == s) & (perf_df_v['prob measure'] == prob_measure)]['total val return'].to_numpy())
                 avg_total_tes_pre_returns = np.average(perf_df_t[(perf_df_t['method'] == method) & (perf_df_t['dataset'] == dataset) & (perf_df_t['dropout'] == dropout) & (perf_df_t['prob'] == s) & (perf_df_t['prob measure'] == prob_measure)]['total tes return'].to_numpy())
@@ -897,3 +893,98 @@ def run_experiment_2_dropout():
                 df_2 = pd.DataFrame(perf_dict_2)
                 perf_df2 = concat(perf_df2, df_2)
                 save_file(perf_df2, 'experiment2/dropout/model/dropout_pre_returns_grouped_results.csv')
+
+            #Find best prob for each ticker according to highest validation log return
+            ret_val_prob_dic = {'method': [], 'dataset': [], 'dropout': [], 'run': [], 'best prob': [], 'prob measure': [], 'ticker filename': [], 'total val log return': []}
+            for t in val_tickers:
+                ticker_mapping = perf_ret_val_df[(perf_ret_val_df['ticker filename'] == t) & (perf_ret_val_df['method'] == method) & (perf_ret_val_df['dataset'] == dataset) & (perf_ret_val_df['dropout'] == dropout) & (perf_ret_val_df['prob measure'] == prob_measure)]                        
+                ticker_mapping = ticker_mapping.reset_index()
+                val_best_ind = ticker_mapping['total log return'].idxmax()
+                val_best_prob = ticker_mapping.iloc[val_best_ind]['prob']
+                val_best_log_return = ticker_mapping.iloc[val_best_ind]['total log return']
+
+                ret_val_prob_dic['method'].append(method)
+                ret_val_prob_dic['dataset'].append(dataset)
+                ret_val_prob_dic['dropout'].append(dropout)
+                ret_val_prob_dic['run'].append(run)  
+                ret_val_prob_dic['best prob'].append(val_best_prob)
+                ret_val_prob_dic['prob measure'].append(prob_measure)
+                ret_val_prob_dic['ticker filename'].append(t)
+                ret_val_prob_dic['total val log return'].append(val_best_log_return)
+
+            ret_val_prob_df = pd.DataFrame(ret_val_prob_dic)
+            perf_ret_val_prob_df = concat(perf_ret_val_prob_df, ret_val_prob_df)
+            save_file(perf_ret_val_prob_df, 'experiment2/dropout/dropout_pre_val_prob_ticker_returns_results.csv')
+
+            #calculate signals by catering for uncertainty, filtering based on the threshold level per ticker (validation)
+            perf_val_tuned_df, perf_ret_val_tuned_df = tune_results(val_pre_prob, best_valid_perf, 
+            val_mappings, run, method, dataset, dropout, prob_measure,
+            ret_val_prob_df,
+            True, val_best_benchmark_model, best_benchmark_val_model, perf_val_tuned_df,
+            val_tickers, perf_ret_val_tuned_df)
+
+            #calculate signals by catering for uncertainty, filtering based on the threshold level per ticker (test)
+            perf_tes_tuned_df, perf_ret_tes_tuned_df = tune_results(tes_pre_prob, best_test_perf, 
+            tes_mappings, run, method, dataset, dropout, prob_measure,
+            ret_val_prob_df,
+            False, tes_best_benchmark_model, best_benchmark_tes_model, perf_tes_tuned_df,
+            tes_tickers, perf_ret_tes_tuned_df)
+
+
+def get_max_prob_mappings(prob_arr, mappings):
+    # prob_arr_reshape = np.reshape(prob_arr, (prob_arr.shape[1]))
+    prob_df = pd.DataFrame(prob_arr, columns=['prob_array'])
+    mapping_df = pd.DataFrame(mappings)
+    prob_df = prob_df.merge(mapping_df, left_index=True, right_index=True)
+    group_by_df = prob_df.groupby('ticker_filename').agg({'prob_array': 'max'})
+    mappings_merge = mapping_df.merge(group_by_df, 
+    left_on='ticker_filename', \
+    right_on='ticker_filename', \
+    how='inner', sort=False).sort_values(by='ins_ind', ascending=True).reset_index()
+
+    mapping_df['max_prob'] = mappings_merge['prob_array']
+    return mapping_df.to_dict(orient='records')
+
+def tune_results(pre_prob, best_perf, 
+mappings, run, method, dataset, dropout, prob_measure, ret_prob_df,
+
+is_validation_set, best_benchmark_run_model, best_benchmark_ticker_model, perf_tuned_df,
+
+tickers, ret_tuned_df):
+    mappings_tuned_arr, cur_valid_perf = get_signals(pre_prob, best_perf['pred'], best_perf['gt'], 
+    mappings, run, method, dataset, dropout, prob_measure, None, best_perf['hinge'], 
+    best_perf['additional_metrics'], ret_prob_df)
+    
+    mappings_tuned_df = pd.DataFrame(mappings_tuned_arr)        
+
+    if is_validation_set:   
+        tuned_results_path = 'experiment2/dropout/run/dropout_pre_val_tuned_returns_results.csv'  
+        ticker_results_path = 'experiment2/dropout/ticker/dropout_pre_val_prob_ticker_returns_results.csv' 
+        df_tuned_v, df_tuned_t, mappings_tuned_df, placeholder = get_run_aggregate(
+        mappings_tuned_df, None,
+        best_perf, None,
+        cur_valid_perf, None,
+        best_benchmark_run_model, None, method,
+        dataset, dropout, run, None, prob_measure)
+        perf_tuned_df = concat(perf_tuned_df, df_tuned_v)
+    else:
+        tuned_results_path = 'experiment2/dropout/run/dropout_pre_tes_tuned_returns_results.csv'  
+        ticker_results_path = 'experiment2/dropout/ticker/dropout_pre_tes_prob_ticker_returns_results.csv' 
+        df_tuned_v, df_tuned_t, placeholder, mappings_tuned_df = get_run_aggregate(
+        None, mappings_tuned_df,
+        None, best_perf,
+        None, cur_valid_perf,
+        None, best_benchmark_run_model, method,
+        dataset, dropout, run, None, prob_measure)
+            
+        perf_tuned_df = concat(perf_tuned_df, df_tuned_t)
+
+    ret_tuned_df = get_ticker_aggregate(tickers, mappings_tuned_df, best_benchmark_ticker_model,
+                                                method, dataset, dropout, run, None, prob_measure, ret_prob_df)
+    perf_ret_tuned_df = concat(ret_tuned_df, ret_tuned_df)
+
+    save_file(perf_tuned_df, tuned_results_path)
+    save_file(perf_ret_tuned_df, ticker_results_path)
+
+    return perf_tuned_df, perf_ret_tuned_df
+                

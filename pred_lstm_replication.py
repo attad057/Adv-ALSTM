@@ -2,8 +2,49 @@ from pred_lstm import AWLSTM
 import pandas as pd
 import os
 import numpy as np
-import dataframe_image as dfi
 import pickle     
+from scipy import stats
+
+def t_test_summary(mean1, std1, n1, mean2, std2, n2):
+    # Calculate the standard error
+    se = np.sqrt((std1**2 / n1) + (std2**2 / n2))
+    
+    # Calculate the t-statistic
+    t_stat = (mean1 - mean2) / se
+    
+    # Calculate the degrees of freedom using the Welch-Satterthwaite equation
+    df = ( (std1**2 / n1 + std2**2 / n2)**2 ) / ( ( (std1**2 / n1)**2 / (n1 - 1) ) + ( (std2**2 / n2)**2 / (n2 - 1) ) )
+    
+    # Calculate the p-value using the t-distribution
+    p_value = stats.t.sf(np.abs(t_stat), df) * 2  # Two-tailed p-value
+    
+    return t_stat, p_value, df
+
+def t_test_summary_array(mean1_array, std1_array, n1_array, mean2_array, std2_array, n2_array):
+    for i in range(len(mean1_array)):
+        mean1 = mean1_array[i]
+        std1 = std1_array[i]
+        n1 = n1_array[i]
+        mean2 = mean2_array[i]
+        std2 = std2_array[i]
+        n2 = n2_array[i]
+        print(f"Group 1: mean={mean1}, std={std1}, n={n1}")
+        print(f"Group 2: mean={mean2}, std={std2}, n={n2}")
+
+        # Call the function
+        t_stat, p_value, df = t_test_summary(mean1, std1, n1, mean2, std2, n2)
+
+        # Output the results
+        print(f"t-statistic: {t_stat:.3f}")
+        print(f"p-value: {p_value:.4f}")
+        print(f"Degrees of freedom: {df:.2f}")
+
+        # Optional: Compare the p-value to alpha (usually 0.05)
+        alpha = 0.05
+        if p_value < alpha:
+            print("Reject the null hypothesis: There is a significant difference between the two groups.")
+        else:
+            print("Fail to reject the null hypothesis: No significant difference between the two groups.")
 
 def run_replication(predefined_args, args):    
         perf_df = None

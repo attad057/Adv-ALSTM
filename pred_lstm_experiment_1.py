@@ -259,7 +259,7 @@ def run_experiment_1_dropout(predefined_args, args):
 
     return perf_df, perf_df2
 
-def run_experiment_1_dropout_uncertainty():
+def run_experiment_1_dropout_uncertainty(threshold_strategy_arr):
     benchmark_df = pd.read_csv('./experiment1/dropout/perf_dropout_results.csv')
     prob_arr = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0]
     perf_df = None
@@ -292,112 +292,153 @@ def run_experiment_1_dropout_uncertainty():
             prob_measure = best_valid_perf['prob_arr'][mi]['measure']
 
             #for i, a in enumerate(best_valid_perf['prob_arr']):
-            for p in prob_arr:
-                valid_prob_arr = np.copy(val_pre_prob)
-                valid_pred = np.copy(best_valid_perf['pred'])
-                valid_gt = np.copy(best_valid_perf['gt'])
+            for st in threshold_strategy_arr:
+                for p in prob_arr:
+                    valid_prob_arr = np.copy(val_pre_prob)
+                    max_valid_prob = np.max(valid_prob_arr)
 
-                valid_pred_mask_array = []
-                valid_gt_mask_array = []
+                    valid_pred = np.copy(best_valid_perf['pred'])
+                    valid_gt = np.copy(best_valid_perf['gt'])
 
-                valid_filtered = 0
-                valid_filtered_successfully = 0
-                for i, x in np.ndenumerate(valid_prob_arr):
-                    filt = True
-                    if x > (1-p):
-                        filt = False
-                        valid_filtered = valid_filtered + 1
-                        if valid_gt[i] != valid_pred[i]:
-                            valid_filtered_successfully = valid_filtered_successfully + 1
+                    valid_pred_mask_array = []
+                    valid_gt_mask_array = []
+
+                    valid_filtered = 0
+                    valid_filtered_successfully = 0
+                    valid_success_score = 0
+                    valid_failure_score = 0
+                    for i, x in np.ndenumerate(valid_prob_arr):
+                        filt = True
+                        #perc = (x/max_valid_prob) * 100
+                        #max_valid_perc = (100-(p*100))
+                        #if perc > max_valid_perc and valid_pred[i] == 0:
+                        if x > (1-p) and (st == 'normal' or (st == 'true' and valid_pred[i] == 1) or (st == 'false' and valid_pred[i] == 0)):
+                            filt = False
+                            valid_filtered = valid_filtered + 1
+                            if valid_gt[i] != valid_pred[i]:
+                                valid_filtered_successfully = valid_filtered_successfully + 1
+                        if ((valid_gt[i] == valid_pred[i] and filt == True) or (valid_gt[i] != valid_pred[i] and filt == False)):
+                            valid_success_score = valid_success_score + 1 
+                        else:
+                            valid_failure_score = valid_failure_score + 1
+                        pred = valid_pred[i]
+                        gt = valid_gt[i]
+                        valid_pred_mask_array.append(filt)
+                        valid_gt_mask_array.append(filt)
+
+                    valid_pred_filter = valid_pred[valid_pred_mask_array]
+                    valid_gt_filter = valid_gt[valid_gt_mask_array]
+
+                    total_valid_predictions = valid_gt_filter.shape[0]
+                    if valid_pred_filter.shape[0] == 0:
+                        valid_pred_filter = np.zeros((valid_pred.shape[0], valid_pred.shape[1]))
+                    if valid_gt_filter.shape[0] == 0:
+                        valid_gt_filter = np.zeros((valid_gt.shape[0], valid_gt.shape[1]))
+
+                    cur_valid_perf = evaluate(valid_pred_filter, valid_gt_filter, best_valid_perf['hinge'], additional_metrics=best_valid_perf['additional_metrics'])
                     
-                    valid_pred_mask_array.append(filt)
-                    valid_gt_mask_array.append(filt)
+                    uncertainty_run_save_path_uncertainty = run_save_path + '/' + str(p)
+                    if not os.path.exists(uncertainty_run_save_path_uncertainty):
+                        os.mkdir(uncertainty_run_save_path_uncertainty)  
 
-                valid_pred_filter = valid_pred[valid_pred_mask_array]
-                valid_gt_filter = valid_gt[valid_gt_mask_array]
+                    with open(uncertainty_run_save_path_uncertainty + '/valid_pred_filter.pkl', 'wb') as valid_pred_filter_file:
+                        pickle.dump(valid_pred_filter, valid_pred_filter_file)
+                    with open(uncertainty_run_save_path_uncertainty + '/valid_gt_filter.pkl', 'wb') as valid_gt_filter_file:
+                        pickle.dump(valid_gt_filter, valid_gt_filter_file)
 
-                total_valid_predictions = valid_gt_filter.shape[0]
-                if valid_pred_filter.shape[0] == 0:
-                    valid_pred_filter = np.zeros((valid_pred.shape[0], valid_pred.shape[1]))
-                if valid_gt_filter.shape[0] == 0:
-                    valid_gt_filter = np.zeros((valid_gt.shape[0], valid_gt.shape[1]))
+                    test_prob_arr = np.copy(tes_pre_prob)
+                    #max_test_prob = np.max(test_prob_arr)
+                    test_pred = np.copy(best_test_perf['pred'])
+                    test_gt = np.copy(best_test_perf['gt'])
 
-                cur_valid_perf = evaluate(valid_pred_filter, valid_gt_filter, best_valid_perf['hinge'], additional_metrics=best_valid_perf['additional_metrics'])
+                    test_pred_mask_array = []
+                    test_gt_mask_array = []
 
-                test_prob_arr = np.copy(tes_pre_prob)
-                test_pred = np.copy(best_test_perf['pred'])
-                test_gt = np.copy(best_test_perf['gt'])
+                    test_filtered = 0
+                    test_filtered_successfully = 0
+                    test_success_score = 0
+                    test_failure_score = 0
+                    for i, x in np.ndenumerate(test_prob_arr):
+                        filt = True
+                        #perc = (x/max_test_prob) * 100
+                        #max_test_perc = (100-(p*100))
+                        #if perc > max_test_perc and test_pred[i] == 0 :
+                        if x > (1-p) and (st == 'normal' or (st == 'true' and test_pred[i] == 1) or (st == 'false' and test_pred[i] == 0)):
+                            filt = False
+                            test_filtered = test_filtered + 1
+                            if test_gt[i] != test_pred[i]:
+                                test_filtered_successfully = test_filtered_successfully + 1
+                        if ((test_gt[i] == test_pred[i] and filt == True) or (test_gt[i] != test_pred[i] and filt == False)):
+                            test_success_score = test_success_score + 1 
+                        else:
+                            test_failure_score = test_failure_score + 1
+                        test_pred_mask_array.append(filt)
+                        test_gt_mask_array.append(filt)
 
-                test_pred_mask_array = []
-                test_gt_mask_array = []
+                    test_pred_filter = test_pred[test_pred_mask_array]
+                    test_gt_filter = test_gt[test_gt_mask_array]
+                    total_test_predictions = test_pred_filter.shape[0]
+                    if test_pred_filter.shape[0] == 0:
+                        test_pred_filter = np.zeros((test_pred.shape[0], test_pred.shape[1]))
+                    if test_gt_filter.shape[0] == 0:
+                        test_gt_filter = np.zeros((test_gt.shape[0], test_gt.shape[1]))
 
-                test_filtered = 0
-                test_filtered_successfully = 0
-                for i, x in np.ndenumerate(test_prob_arr):
-                    filt = True
-                    if x > (1-p):
-                        filt = False
-                        test_filtered = test_filtered + 1
-                        if test_gt[i] != test_pred[i]:
-                            test_filtered_successfully = test_filtered_successfully + 1
+                    cur_test_perf = evaluate(test_pred_filter, test_gt_filter, best_test_perf['hinge'], additional_metrics=best_test_perf['additional_metrics'])
+                    with open(run_save_path + '/' + str(p) + '/test_pred_filter.pkl', 'wb') as test_pred_filter_file:
+                        pickle.dump(test_pred_filter, test_pred_filter_file)
+                    with open(run_save_path + '/' + str(p) + '/test_gt_filter.pkl', 'wb') as test_gt_filter_file:
+                        pickle.dump(test_gt_filter, test_gt_filter_file)
 
-                    test_pred_mask_array.append(filt)
-                    test_gt_mask_array.append(filt)
+                    val_avg_prob = np.average(val_pre_prob)
+                    tes_avg_prob = np.average(tes_pre_prob)
 
-                test_pred_filter = test_pred[test_pred_mask_array]
-                test_gt_filter = test_gt[test_gt_mask_array]
-                total_test_predictions = test_pred_filter.shape[0]
-                if test_pred_filter.shape[0] == 0:
-                    test_pred_filter = np.zeros((test_pred.shape[0], test_pred.shape[1]))
-                if test_gt_filter.shape[0] == 0:
-                    test_gt_filter = np.zeros((test_gt.shape[0], test_gt.shape[1]))
+                    perf_dict = {
+                            'method': [row['method']],
+                            'dataset': [row['dataset']],
+                            'test acc': [cur_test_perf['acc'] * 100],
+                            'test mcc': [cur_test_perf['mcc']],
+                            'test ll': [cur_test_perf['ll']],
+                            'test rs': [cur_test_perf['rs']],
+                            'test ps' : [cur_test_perf['ps']],
+                            'test avg prob': [tes_avg_prob],
+                            'valid acc': [cur_valid_perf['acc'] * 100],
+                            'valid mcc': [cur_valid_perf['mcc']],
+                            'valid ll': [cur_valid_perf['ll']],
+                            'valid rs': [cur_valid_perf['rs']],
+                            'valid ps' : [cur_valid_perf['ps']],
+                            'valid avg prob': [val_avg_prob],
+                            'prob measure': [prob_measure],
+                            'dropout' : [row['dropout']],
+                            'run': [row['run']],
+                            'prob confidence threshold': [p],
+                            'thresholding strategy': [st],
+                            'iterations': [row['iterations']],
+                            'run save path': [row['run save path']],
+                            'total test predictions': [total_test_predictions],
+                            'filtered test predictions': [test_filtered],
+                            'filtered test predictions sucessfully': [test_filtered_successfully],
+                            'filtered test predictions sucessful ratio': [test_filtered and test_filtered_successfully / test_filtered or 0],
+                            'test success score': [test_success_score],
+                            'test failure score': [test_failure_score],
+                            'test score':[test_success_score / (test_success_score + test_failure_score)],
+                            'total valid predictions': [total_valid_predictions],
+                            'filtered valid predictions': [valid_filtered],
+                            'filtered valid predictions sucessfully': [valid_filtered_successfully],
+                            'filtered valid predictions sucessful ratio': [valid_filtered and valid_filtered_successfully / valid_filtered or 0],
+                            'valid success score': [valid_success_score],
+                            'valid failure score': [valid_failure_score],
+                            'valid score': [valid_success_score / (valid_success_score + valid_failure_score)]
+                        }
 
-                cur_test_perf = evaluate(test_pred_filter, test_gt_filter, best_test_perf['hinge'], additional_metrics=best_test_perf['additional_metrics'])
+                    df = pd.DataFrame(perf_dict)
+                    if perf_df is None:
+                        perf_df = df
+                    else:
+                        perf_df = pd.concat([perf_df, df])            
 
+                    if not os.path.exists('experiment1'):
+                        os.mkdir('experiment1')
+                    if not os.path.exists('experiment1/dropout_uncertainty'):
+                        os.mkdir('experiment1/dropout_uncertainty')
 
-                val_avg_prob = np.average(val_pre_prob)
-                tes_avg_prob = np.average(tes_pre_prob)
-
-                perf_dict = {
-                        'method': [row['method']],
-                        'dataset': [row['dataset']],
-                        'test acc': [cur_test_perf['acc'] * 100],
-                        'test mcc': [cur_test_perf['mcc']],
-                        'test ll': [cur_test_perf['ll']],
-                        'test rs': [cur_test_perf['rs']],
-                        'test ps' : [cur_test_perf['ps']],
-                        'test avg prob': [tes_avg_prob],
-                        'valid acc': [cur_valid_perf['acc'] * 100],
-                        'valid mcc': [cur_valid_perf['mcc']],
-                        'valid ll': [cur_valid_perf['ll']],
-                        'valid rs': [cur_valid_perf['rs']],
-                        'valid ps' : [cur_valid_perf['ps']],
-                        'valid avg prob': [val_avg_prob],
-                        'prob measure': [prob_measure],
-                        'dropout' : [row['dropout']],
-                        'run': [row['run']],
-                        'prob confidence threshold': [p],
-                        'iterations': [row['iterations']],
-                        'run save path': [row['run save path']],
-                        'total test predictions': [total_test_predictions],
-                        'filtered test predictions': [test_filtered],
-                        'filtered test predictions sucessfully': [test_filtered_successfully],
-                        'filtered test predictions sucessful ratio': [test_filtered and test_filtered_successfully / test_filtered or 0],
-                        'total valid predictions': [total_valid_predictions],
-                        'filtered valid predictions': [valid_filtered],
-                        'filtered valid predictions sucessfully': [valid_filtered_successfully],
-                        'filtered valid predictions sucessful ratio': [valid_filtered and valid_filtered_successfully / valid_filtered or 0],
-                    }
-
-                df = pd.DataFrame(perf_dict)
-                if perf_df is None:
-                    perf_df = df
-                else:
-                    perf_df = pd.concat([perf_df, df])            
-
-                if not os.path.exists('experiment1'):
-                    os.mkdir('experiment1')
-                if not os.path.exists('experiment1/dropout_uncertainty'):
-                    os.mkdir('experiment1/dropout_uncertainty')
-
-                perf_df.to_csv('experiment1/dropout_uncertainty/perf_dropout_results.csv', index = False)
+                    perf_df.to_csv('experiment1/dropout_uncertainty/perf_dropout_results.csv', index = False)

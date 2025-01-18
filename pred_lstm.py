@@ -364,61 +364,30 @@ class AWLSTM:
         np.savetxt(self.model_save_path + '_val_gt.csv', self.val_gt)
         np.savetxt(self.model_save_path + '_tr_gt.csv', tr_gt)
 
-    def monte_carlo_softmax(self, pre_np_arr):
-        #2555, 3000
-        pre_arr_s = np.reshape(np.transpose(pre_np_arr), (pre_np_arr.shape[1], pre_np_arr.shape[0]))
-        pre_exp = np.exp(pre_arr_s)
-        pre_exp_sum = np.reshape(np.sum(pre_exp, axis = 1), (pre_np_arr.shape[1], pre_np_arr.shape[2]))
-        soft_max = pre_exp/pre_exp_sum
-
-        # #2555
-        # label_1_count = np.count_nonzero(pre_arr_s, axis = 1).astype(np.float32)
-        # label_0_count = (pre_arr_s.shape[1] - label_1_count).astype(np.float32)
-
-        # #2555, 3000
-        # for idx, x in enumerate(pre_arr_s):
-        #     has_1 = False
-        #     has_0 = False
-        #     for idx2, x2 in enumerate(x):
-        #         if x2 == 1:
-        #             soft_max[idx][idx2] = np.round(np.multiply(soft_max[idx][idx2], label_1_count[idx]), 4)
-        #             has_1 = True
-        #             if soft_max[idx][idx2] == 1:
-        #                 has_0 = True
-        #         else:
-        #             soft_max[idx][idx2] = np.round(np.multiply(soft_max[idx][idx2], label_0_count[idx]), 4)
-        #             has_0 = True
-        #             if soft_max[idx][idx2] == 1:
-        #                 has_1 = True
-        #         if has_1 == True and has_0 == True:
-        #             break
-                    
-        ind_columns = np.argmax(soft_max, axis=1)
-
-        #take best indexes from pre_np_arr
-        ind_rows = np.arange(pre_np_arr.shape[1])
-        pre = np.reshape(pre_arr_s[ind_rows, ind_columns], (pre_np_arr.shape[1], pre_np_arr.shape[2]))
-        return pre, np.max(soft_max, axis=1)
-
-    def monte_carlo_average(self, pre_np_arr):
+    def monte_carlo_average(self, pre_np_arr, hinge):
         #2555, 3000
         pre_arr_s = np.reshape(np.transpose(pre_np_arr), (pre_np_arr.shape[1], pre_np_arr.shape[0]))
         pre_avg = np.mean(pre_arr_s, axis = 1)
         pre_std = np.std(pre_arr_s, axis = 1)
         pre_var = np.var(pre_arr_s, axis = 1)
         pre_entr = np.zeros((pre_std.shape[0]))
+        
+        pre_avg_s = np.reshape(pre_avg, (pre_avg.shape[0], 1))
 
         for i, x in enumerate(pre_arr_s):
             value, counts = np.unique(x, return_counts=True)
             entr = entropy(counts, base=None)
             pre_entr[i] = entr
+
+        pred_label = label(hinge, pre_avg_s)
+         
         #pre_avg_round = np.reshape(np.round(pre_avg), (pre_np_arr.shape[1], pre_np_arr.shape[2]))
 
         #take best indexes from pre_np_arr
         # ind_rows = np.arange(pre_np_arr.shape[1])
         # pre = np.reshape(pre_arr_s[ind_rows, ind_columns], (pre_np_arr.shape[1], pre_np_arr.shape[2]))
         #threshold 0.5 and up = 1 else 0
-        return np.reshape(np.floor(pre_avg + 0.5), (pre_np_arr.shape[1], pre_np_arr.shape[2])), [{'measure': 'std', 'val': pre_std},{'measure': 'var', 'val': pre_var},{'measure': 'entr', 'val': pre_entr}]
+        return np.reshape(pred_label, (pre_np_arr.shape[1], pre_np_arr.shape[2])), [{'measure': 'std', 'val': pre_std},{'measure': 'var', 'val': pre_var},{'measure': 'entr', 'val': pre_entr}]
 
     def predict_adv(self):
         self.construct_graph()
@@ -580,7 +549,8 @@ class AWLSTM:
             loss, pre = sess.run(
                 fetches, feed_dict
             )
-            result_queue.put((label(hinge, pre), loss))
+            #result_queue.put((label(hinge, pre), loss))
+            result_queue.put((pre, loss))
         num_threads = iterations
         iterations_arr = [*range(int(math.ceil(iterations / num_threads)) + 1)][1:]
 
@@ -635,7 +605,7 @@ class AWLSTM:
         l_np_arr = np.array(l_arr)
 
         if self.dropout_activation_function == 'avg':
-            pre, pre_prob = self.monte_carlo_average(l_np_arr)
+            pre, pre_prob = self.monte_carlo_average(l_np_arr, self.hinge)
 
         cur_perf = evaluate(pre, gt, self.hinge, additional_metrics=True)
         cur_perf['prob_arr'] = pre_prob
@@ -999,287 +969,6 @@ class AWLSTM:
             return best_valid_perf, best_test_perf, best_iterations
         else:
             return best_valid_pred, best_test_pred, best_iterations
-            
-    def train_convergence_monte_carlo_dropout(self, tune_para=False, benchmark_increment = 250, max_iteration = 500000):
-        # iterations_benchmark_arr.sort()
-        # max_iteration = iterations_benchmark_arr[-1]
-        iterations_arr = [*range(max_iteration + 1)][1:]
-        #val_std_arr = []
-        #tes_std_arr = []
-
-        best_valid_perf = {
-            'acc': 0, 'mcc': -2
-        }
-        best_test_perf = {
-            'acc': 0, 'mcc': -2
-        }
-
-        self.construct_graph()
-        sess = tf.Session()
-        saver = tf.train.Saver()
-        if self.reload:
-            saver.restore(sess, self.model_path)
-            print('model restored')
-        else:
-            sess.run(tf.global_variables_initializer())
-
-        best_valid_pred = np.zeros(self.val_gt.shape, dtype=float)
-        best_test_pred = np.zeros(self.tes_gt.shape, dtype=float)
-
-        bat_count = self.tra_pv.shape[0] // self.batch_size
-        if not (self.tra_pv.shape[0] % self.batch_size == 0):
-            bat_count += 1
-
-        #epochs_arr = [*range(2)][1:]
-        epochs_arr = [*range(self.epochs + 1)][1:]
-        val_rt_curr = np.zeros(self.val_gt.shape[0])
-        tes_rt_curr = np.zeros(self.tes_gt.shape[0])
-        val_std_p_arr = []
-        tes_std_p_arr = []
-
-        for i in epochs_arr:
-    
-            t1 = time()
-            # first_batch = True
-            tra_loss = 0.0
-            tra_obj = 0.0
-            l2 = 0.0
-            tra_adv = 0.0
-
-            for j in range(bat_count):
-                pv_b, wd_b, gt_b = self.get_batch(j * self.batch_size)
-                feed_dict = {
-                    self.pv_var: pv_b,
-                    self.wd_var: wd_b,
-                    self.gt_var: gt_b,
-                    self.state_keep_prob_var: self.default_state_keep_prob,
-                    self.input_keep_prob_var: self.default_input_keep_prob,
-                    self.output_keep_prob_var: self.default_output_keep_prob
-                }
-
-                cur_pre, cur_obj, cur_loss, cur_l2, cur_al, batch_out = sess.run(
-                    (self.pred, self.obj_func, self.loss, self.l2_norm, self.adv_loss,
-                    self.optimizer),
-                    feed_dict
-                )
-
-                tra_loss += cur_loss
-                tra_obj += cur_obj
-                l2 += cur_l2
-                tra_adv += cur_al
-            print('----->>>>> Training:', tra_obj / bat_count,
-                tra_loss / bat_count, l2 / bat_count, tra_adv / bat_count, '\t state_keep_prob', self.state_keep_prob)
-
-            if not tune_para:
-                tra_loss = 0.0
-                tra_obj = 0.0
-                l2 = 0.0
-                tra_acc = 0.0
-                for j in range(bat_count):
-                    pv_b, wd_b, gt_b = self.get_batch(
-                        j * self.batch_size)
-                    feed_dict = {
-                        self.pv_var: pv_b,
-                        self.wd_var: wd_b,
-                        self.gt_var: gt_b,
-                        self.state_keep_prob_var: self.default_state_keep_prob,
-                        self.input_keep_prob_var: self.default_input_keep_prob,
-                        self.output_keep_prob_var: self.default_output_keep_prob
-                    }
-                    cur_obj, cur_loss, cur_l2, cur_pre = sess.run(
-                        (self.obj_func, self.loss, self.l2_norm, self.pred),
-                        feed_dict
-                    )
-                    cur_tra_perf = evaluate(cur_pre, gt_b, self.hinge)
-                    tra_loss += cur_loss
-                    l2 += cur_l2
-                    tra_obj += cur_obj
-                    tra_acc += cur_tra_perf['acc']
-                print('Training:', tra_obj / bat_count, tra_loss / bat_count,
-                    l2 / bat_count, '\tTrain per:', tra_acc / bat_count)
-            t4 = time()
-            print('epoch:', i, ('time: %.4f ' % (t4 - t1)))
-            self.tra_pv, self.tra_wd, self.tra_gt = shuffle(
-                self.tra_pv, self.tra_wd, self.tra_gt, random_state=0
-            )
-        # test on validation set
-        val_l_arr = []
-        val_pre_arr = []
-        feed_dict = {
-            self.pv_var: self.val_pv,
-            self.wd_var: self.val_wd,
-            self.gt_var: self.val_gt,
-            self.state_keep_prob_var: self.state_keep_prob,
-            self.input_keep_prob_var: self.input_keep_prob,
-            self.output_keep_prob_var: self.output_keep_prob
-        }
-        
-        #iterations_arr = [*range(100000 + 1)][1:]
-        val_l_np_arr = np.array([])
-        for r in iterations_arr:
-            val_loss, val_pre = sess.run(
-                (self.loss, self.pred), feed_dict
-            )
-
-            val_pre_arr.append(val_pre)
-
-            print('val: ' + str(r))
-
-            if (r >= benchmark_increment and r % benchmark_increment == 0):
-
-                val_l_np_arr = np.array(val_pre_arr[0: r])
-                pre_arr_s = np.reshape(np.transpose(val_l_np_arr), (val_l_np_arr.shape[1], val_l_np_arr.shape[0]))
-                val_std = np.std(pre_arr_s, axis = 1)
-                val_std_err = val_std / np.sqrt(np.array([pre_arr_s.shape[1]]))
-                val_rt_diff = (val_std_err - val_rt_curr) 
-
-                if r == benchmark_increment or np.any(val_rt_diff > 0):
-                    rt = val_std_err + ((val_std_err / 100) * 5)
-                    val_rt_curr = rt
-
-                elif r == max_iteration:
-                    val_std_p_arr.append({'avg std err': np.mean(val_std_err), 'epoch': i, 'iterations': str(r-benchmark_increment), 'ci': None})
-                    print('reached maximum ' + str(r) + ' iterations, did not pass 95% confidence interval')
-                    break;
-                else:
-                    val_std_p_arr.append({'avg std err': np.mean(val_std_err), 'epoch': i, 'iterations': str(r-benchmark_increment), 'ci': 95})
-                    print('within 95% confidence interval ' + str(r) + ' iterations')
-                    break;
-
-        # test on testing set
-        feed_dict = {
-            self.pv_var: self.tes_pv,
-            self.wd_var: self.tes_wd,
-            self.gt_var: self.tes_gt,
-            self.state_keep_prob_var: self.state_keep_prob,
-            self.input_keep_prob_var: self.input_keep_prob,
-            self.output_keep_prob_var: self.output_keep_prob
-        }
-
-        test_pre_arr = []
-
-        for r in iterations_arr:
-            test_loss, tes_pre = sess.run(
-                (self.loss, self.pred), feed_dict
-            )
-
-            test_pre_arr.append(tes_pre)
-            print('tes: ' + str(r))
-            if (r >= benchmark_increment and r % benchmark_increment == 0):
-                tes_l_np_arr = np.array(test_pre_arr[0: r])
-                pre_arr_s = np.reshape(np.transpose(tes_l_np_arr), (tes_l_np_arr.shape[1], tes_l_np_arr.shape[0]))
-                tes_std = np.std(pre_arr_s, axis = 1)
-                tes_std_err = tes_std / np.sqrt(np.array([pre_arr_s.shape[1]]))
-
-                tes_rt_diff = (tes_std_err - tes_rt_curr) 
-
-                if r == benchmark_increment or np.any(tes_rt_diff > 0):
-                    rt = tes_std_err + ((tes_std_err / 100) * 5)
-                    tes_rt_curr = rt
-
-                elif r == max_iteration:
-                    tes_std_p_arr.append({'avg std err': np.mean(tes_std_err), 'epoch': i, 'iterations': str(r), 'ci': None})
-                    print('reached maximum ' + str(r) + ' iterations, did not pass 95% confidence interval')
-                    break;
-                else:
-                    tes_std_p_arr.append({'avg std err': np.mean(tes_std_err), 'epoch': i, 'iterations': str(r-benchmark_increment), 'ci': 95})
-                    print('within 95% confidence interval ' + str(r-benchmark_increment) + ' iterations')
-                    break;
-        
-        sess.close()
-        tf.reset_default_graph()
-
-        return val_std_p_arr, tes_std_p_arr
-   
-    def train_ensemble(self, tune_para=False, return_perf=False, return_pred=True, param_iterations = 10):
-        parameters = copy.copy(self.paras)
-        start_feat_dim = self.initial_feat_dim
-        start_seq = self.initial_seq
-        parameters['seq'] = start_seq
-        parameters['feat_dim'] = start_feat_dim 
-        decay_seq = np.round(parameters['seq'] / param_iterations )
-        #decay_feat_dim = np.round(parameters['feat_dim'] / param_iterations)
-
-        ensemble_model_results = []
-
-        for r in [*range(param_iterations + 1)][1:]:
-            self.update_model(parameters)
-            best_valid_perf, best_test_perf, best_valid_pred, best_test_pred = pure_LSTM.train(return_perf=True, return_pred=True, tune_para=tune_para, save_model=False)
-            best_valid_pred = label(self.hinge, best_valid_pred)
-            best_test_pred = label(self.hinge, best_test_pred)
-
-            ensemble_model_results.append({
-                'best_valid_perf': best_valid_perf, 
-                'best_test_perf': best_test_perf,
-                'best_valid_pred': best_valid_pred,                
-                'best_test_pred': best_test_pred,
-                'seq': parameters['seq'],
-                'feat_dim': parameters['feat_dim']
-                })
-            #for r2 in [*range(param_iterations)][1:]:
-                #if (parameters['feat_dim'] - decay_feat_dim >= 1):
-                #   parameters['feat_dim'] = int(parameters['feat_dim']  - decay_feat_dim)
-            #        self.update_model(parameters)
-            #        best_valid_perf, best_test_perf, best_valid_pred, best_test_pred = pure_LSTM.train(return_perf=True, return_pred=True, tune_para=tune_para, save_model=False)
-            #        best_valid_pred = label(self.hinge, best_valid_pred)
-            #        best_test_pred = label(self.hinge, best_test_pred)
-
-            #        ensemble_model_results.append({
-            #        'best_valid_perf': best_valid_perf, 
-            #        'best_test_perf': best_test_perf,
-            #        'best_valid_pred': best_valid_pred,                
-            #        'best_test_pred': best_test_pred,
-            #        'seq': parameters['seq'],
-            #        'feat_dim': parameters['feat_dim']
-            #        })
-            if (parameters['seq'] - decay_seq >= 1):
-                parameters['seq'] = int(parameters['seq'] - decay_seq)
-
-            #parameters['feat_dim'] = start_feat_dim 
-
-        #100,2555, 1
-        best_valid_pred_list = np.array(list(map(lambda x: x['best_valid_pred'], ensemble_model_results)))
-        #best_valid_pred_list = np.random.randint(2, size = [25, 2555, 1])
-        val_pre_arr_s = np.transpose(np.reshape(best_valid_pred_list, (best_valid_pred_list.shape[0], best_valid_pred_list.shape[1])))
-        val_pre_arr = []
-        val_std_arr = []
-        for ind, i in enumerate(val_pre_arr_s):
-            val_std_arr.append(np.std(val_pre_arr_s[ind]))
-            pre_unique, pre_count = np.unique(i, return_counts=True)
-            pre_argmax = np.argmax(pre_count)
-            pre_max = pre_unique[pre_argmax]
-            val_pre_arr.append(np.array([pre_max]))
-
-        val_pre = np.array(val_pre_arr)
-        cur_valid_perf = evaluate(val_pre, self.val_gt, self.hinge, additional_metrics=True)
-        cur_valid_perf['prob_arr'] = val_std_arr
-
-        best_test_pred_list = np.array(list(map(lambda x: x['best_test_pred'], ensemble_model_results)))
-        #best_test_pred_list = np.random.randint(2, size = [25, 3720, 1])
-        test_pre_arr_s = np.transpose(np.reshape(best_test_pred_list, (best_test_pred_list.shape[0], best_test_pred_list.shape[1])))
-
-        test_pre_arr = []
-        test_std_arr = []
-        for ind, i in enumerate(test_pre_arr_s):
-            test_std_arr.append(np.std(test_pre_arr_s[ind]))
-            pre_unique, pre_count = np.unique(i, return_counts=True)
-            pre_argmax = np.argmax(pre_count)
-            pre_max = pre_unique[pre_argmax]
-            test_pre_arr.append(np.array([pre_max]))
-
-        test_pre = np.array(test_pre_arr)
-        cur_test_perf = evaluate(test_pre, self.tes_gt, self.hinge, additional_metrics=True)
-        cur_test_perf['prob_arr'] = test_std_arr
-
-        ensemble_model_results = np.array(ensemble_model_results)
-        if return_perf == True and return_pred == True:
-            return ensemble_model_results, cur_valid_perf, cur_test_perf, val_pre, test_pre
-        elif return_perf == True:
-            return ensemble_model_results, cur_valid_perf, cur_test_perf
-        elif return_pred == True:
-            return ensemble_model_results, val_pre, test_pre
-        else:
-            return ensemble_model_results
 
     def update_model(self, parameters):
         data_update = False
