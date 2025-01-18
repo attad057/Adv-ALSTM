@@ -3,6 +3,7 @@ from pred_lstm_experiment_1 import run_experiment_1_dropout, run_experiment_1_dr
 from pred_lstm_experiment_2 import run_experiment_2_replication, run_experiment_2_dropout
 from report import report_dropout_best_runs, report_best_dropout_model_comparison_test, report_dropout_grouped_runs, report_best_dropout_run_binary_graphs, report_compare_ticker_replication, report_uncertainty_heatmap, report_dropout_uncertainty, report_pr_curves, report_best_uncertainty_model_comparison, report_best_model_comparison_test
 import argparse
+from pred_lstm import AWLSTM             
 
 if __name__ == '__main__':
     desc = 'the lstm model'
@@ -52,7 +53,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     dataset = 'stocknet' if 'stocknet' in args.path else 'kdd17' if 'kdd17' in args.path else ''
     method = ''
-    args.action = 'experiment2_dropout'
+    #args.action = 'experiment2_dropout'
     
     if args.action == 'replication':
         predefined_args = [ 
